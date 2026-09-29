@@ -1,0 +1,188 @@
+rules_version = '2';
+
+// valo-lineups のセキュリティルール
+// - 定点を読めるのは：作った本人 / 全体公開ならログインした人全員 / グループ公開ならそのグループのメンバー
+// - 定点を作る・直す・消すのは作った本人だけ
+// - グループを作れるのは admins/{uid} に登録された Google ログインユーザーだけ
+// - メンバー以外は、正しい招待コードを知っているときだけ自分をメンバーに追加できる
+//
+// 反映方法: Firebase コンソール → Firestore Database → ルール に貼り付けて「公開」
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isGuestUser() {
+      return request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    function isAdmin() {
+      return signedIn() && !isGuestUser()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isNonEmptyString(v, max) {
+      return v is string && v.size() > 0 && v.size() <= max;
+    }
+
+    function isMemberOf(groupId) {
+      return groupId is string
+        && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
+    }
+
+    // ---- 許可リスト（コンソールからのみ編集） ----
+    match /admins/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list, write: if false;
+    }
+
+    // ---- グループ ----
+    match /groups/{groupId} {
+
+      function isMember() {
+        return signedIn() && request.auth.uid in resource.data.memberIds;
+      }
+
+      function isOwner() {
+        return isMember() && resource.data.members[request.auth.uid].role == 'owner';
+      }
+
+      function changed() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+
+      // メンバーが自分のメンバー情報（名前・ゲスト表示）だけを更新する
+      function isOwnProfileUpdate() {
+        let me = request.auth.uid;
+        let before = resource.data.members[me];
+        let after = request.resource.data.members[me];
+        let keys = after.diff(before).affectedKeys();
+        return changed().hasOnly(['members'])
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([me])
+          && keys.hasOnly(['name', 'guest'])
+          && (!keys.hasAny(['name']) || isNonEmptyString(after.name, 40))
+          && (!keys.hasAny(['guest']) || after.guest == isGuestUser());
+      }
+
+      // 招待リンクからの参加：自分だけを、正しい招待コード付きで追加する
+      function isValidJoin() {
+        let me = request.auth.uid;
+        let entry = request.resource.data.members[me];
+        return signedIn()
+          && !(me in resource.data.memberIds)
+          && changed().hasOnly(['memberIds', 'members'])
+          && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
+          && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me].toSet())
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([me])
+          && entry.keys().hasOnly(['name', 'role', 'guest', 'joinedAt', 'inviteCode'])
+          && entry.role == 'member'
+          && entry.guest == isGuestUser()
+          && isNonEmptyString(entry.name, 40)
+          && entry.inviteCode == resource.data.inviteCode;
+      }
+
+      // グループから抜ける：オーナー以外が、自分だけを外す
+      function isValidLeave() {
+        let me = request.auth.uid;
+        return isMember()
+          && resource.data.members[me].role != 'owner'
+          && changed().hasOnly(['memberIds', 'members'])
+          && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().difference([me].toSet())
+          && request.resource.data.members.diff(resource.data.members).affectedKeys().hasOnly([me])
+          && !(me in request.resource.data.members);
+      }
+
+      function isValidNewGroup() {
+        let me = request.auth.uid;
+        let d = request.resource.data;
+        return d.keys().hasOnly(['name', 'createdAt', 'createdBy', 'inviteCode', 'memberIds', 'members'])
+          && isNonEmptyString(d.name, 40)
+          && d.createdBy == me
+          && d.memberIds == [me]
+          && d.members.keys().hasOnly([me])
+          && d.members[me].role == 'owner'
+          && d.inviteCode is string && d.inviteCode.size() >= 16;
+      }
+
+      allow get, list: if isMember();
+      allow create: if isAdmin() && isValidNewGroup();
+      allow update: if (isMember() && changed().hasOnly(['name']) && isNonEmptyString(request.resource.data.name, 40))
+        || (isOwner() && changed().hasOnly(['inviteCode']) && request.resource.data.inviteCode.size() >= 16)
+        || (isMember() && isOwnProfileUpdate())
+        || isValidLeave()
+        || isValidJoin();
+      allow delete: if isOwner();
+    }
+
+    // ---- 定点 ----
+    match /lineups/{lineupId} {
+
+      function isPoint(p) {
+        return p is map && p.keys().hasOnly(['x', 'y'])
+          && p.x is number && p.x >= 0 && p.x <= 1
+          && p.y is number && p.y >= 0 && p.y <= 1;
+      }
+
+      function isValidLineup(d) {
+        return d.keys().hasOnly([
+            'map', 'side', 'agent', 'ability', 'site', 'from', 'to',
+            'title', 'notes', 'throwType', 'importance', 'videoUrl', 'imageIds',
+            'visibility', 'groupId', 'ownerId', 'ownerName', 'createdAt', 'updatedAt', 'copiedFrom'])
+          && d.ownerId == request.auth.uid
+          && isNonEmptyString(d.map, 32)
+          && d.side in ['atk', 'def']
+          && isNonEmptyString(d.agent, 32)
+          && d.ability in ['Grenade', 'Ability1', 'Ability2', 'Ultimate']
+          && (d.site == null || d.site in ['A', 'B', 'C', 'mid'])
+          && isPoint(d.from) && isPoint(d.to)
+          && isNonEmptyString(d.title, 80)
+          && d.notes is string && d.notes.size() <= 2000
+          && d.throwType is string && d.throwType.size() <= 20
+          && d.importance in ['essential', 'useful', 'niche']
+          && d.videoUrl is string && d.videoUrl.size() <= 300
+          && (d.videoUrl == '' || d.videoUrl.matches('^https://.*'))
+          && d.imageIds is list && d.imageIds.size() <= 3
+          && d.ownerName is string && d.ownerName.size() <= 40
+          && d.createdAt is number && d.updatedAt is number
+          && (d.visibility == 'private' || d.visibility == 'public'
+            || (d.visibility == 'group' && isMemberOf(d.groupId)));
+      }
+
+      allow read: if signedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || resource.data.visibility == 'public'
+        || (resource.data.visibility == 'group' && isMemberOf(resource.data.groupId)));
+      allow create: if signedIn() && isValidLineup(request.resource.data);
+      allow update: if signedIn() && resource.data.ownerId == request.auth.uid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && isValidLineup(request.resource.data);
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // ---- 画像 ----
+    // ID を知っていればログインした人は読める（ID は推測できないランダム値。一覧は取れない）
+    match /images/{imageId} {
+      allow get: if signedIn();
+      allow list, update: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['ownerId', 'data', 'w', 'h', 'createdAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.data is string
+        && request.resource.data.data.size() <= 750000
+        && request.resource.data.data.matches('^data:image/(webp|jpeg|png);base64,.*');
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // ---- お気に入り・ショートカット（本人だけ） ----
+    match /prefs/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow write: if signedIn() && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['favorites', 'shortcuts'])
+        && (!('favorites' in request.resource.data) || request.resource.data.favorites.size() <= 500)
+        && (!('shortcuts' in request.resource.data) || request.resource.data.shortcuts.size() <= 12);
+    }
+  }
+}
