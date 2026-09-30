@@ -173,6 +173,12 @@ export async function saveLineup(groupId, id, data) {
   return newLineupId;
 }
 
+// 定点の状態（有効 / 要確認 / 無効）をまとめて変える。内容の編集ではないので「更新者」は変えない
+export async function setStatus(groupId, lineupIds, status, note = '') {
+  const stamp = { status, statusNote: note, statusBy: uid(), statusByName: displayName(), statusAt: Date.now() };
+  await commitInChunks(lineupIds.map((id) => (b) => b.update(lineupRef(groupId, id), stamp)));
+}
+
 // imageIds は [立ち位置, 照準, 着弾] の 3 枠。空いている枠は null
 export async function deleteLineup(groupId, lineup) {
   const batch = writeBatch(db);

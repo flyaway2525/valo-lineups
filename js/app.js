@@ -458,6 +458,11 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   let source = sessionStorage.getItem('source') ?? 'all';
   if (!SOURCES.some((s) => s.id === source)) source = 'all';
   const shownSlots = new Set(); // 選んだアビリティだけ表示（空 = 全部）
+  // 表示する状態（有効 / 要確認 / 無効）。最初は無効だけ隠す
+  const DEFAULT_STATUSES = ['ok', 'check'];
+  const shownStatuses = new Set(JSON.parse(sessionStorage.getItem('statuses') ?? 'null') ?? DEFAULT_STATUSES);
+  // 見直しモード：このマップの要確認の定点を、攻守・エージェントに関係なく一覧にする
+  let reviewing = false;
   let selected = null; // 選んでいる着弾点のクラスター
   let pendingSelect = null; // 次の描画で選ぶ着弾点
   let mode = sessionStorage.getItem('mode') ?? 'map';
@@ -466,10 +471,14 @@ function mapView(root, { groupId, mapId, side, agentId }) {
 
   const go = (next) => location.replace(viewHash(groupId, { mapId, side, agentId, ...next }));
 
+  const statusShown = (l) => shownStatuses.has(valo.statusOf(l));
+
   // 表示する定点（地図とリストで共通）
   function visible() {
+    if (reviewing) return lineups.filter(statusShown);
     return lineups.filter(
       (l) =>
+        statusShown(l) &&
         l.side === side &&
         (!agentId || l.agent === agentId) &&
         (!shownSlots.size || shownSlots.has(l.ability)) &&
@@ -521,8 +530,9 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   const agentStrip = h('div', { class: 'agent-strip' });
   const abilityRow = h('div', { class: 'ability-row' });
   const toolRow = h('div', { class: 'tool-row' });
+  const statusRow = h('div', { class: 'tool-row' });
   const listBox = h('div', { class: 'lineup-list' });
-  const panel = h('section', { class: 'panel' }, shortcutRow, agentStrip, abilityRow, toolRow, listBox);
+  const panel = h('section', { class: 'panel' }, shortcutRow, agentStrip, abilityRow, toolRow, statusRow, listBox);
 
   root.append(h('div', { class: 'map-screen' }, topbar, h('div', { class: 'map-wrap' }, mv.el), panel));
 
@@ -566,7 +576,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
 
   function renderAgents() {
     const counts = {};
-    for (const l of lineups) if (l.side === side) counts[l.agent] = (counts[l.agent] ?? 0) + 1;
+    for (const l of lineups) if (l.side === side && statusShown(l)) counts[l.agent] = (counts[l.agent] ?? 0) + 1;
     setChildren(
       agentStrip,
       master.agents.map((a) =>
@@ -600,7 +610,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     abilityRow.hidden = !agent;
     if (!agent) return;
     const counts = {};
-    for (const l of lineups) if (l.side === side && l.agent === agentId) counts[l.ability] = (counts[l.ability] ?? 0) + 1;
+    for (const l of lineups) if (l.side === side && l.agent === agentId && statusShown(l)) counts[l.ability] = (counts[l.ability] ?? 0) + 1;
     setChildren(
       abilityRow,
       agent.abilities.map((ab) =>
@@ -657,6 +667,98 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     );
   }
 
+  function saveStatuses() {
+    sessionStorage.setItem('statuses', JSON.stringify([...shownStatuses]));
+  }
+
+  // 状態ボタン：押すたびに表示 / 非表示（全部は隠せない）
+  function toggleStatus(id) {
+    if (shownStatuses.has(id)) {
+      if (shownStatuses.size === 1) return;
+      shownStatuses.delete(id);
+    } else {
+      shownStatuses.add(id);
+    }
+    saveStatuses();
+    selected = null;
+    render();
+  }
+
+  function renderStatus() {
+    const counts = { ok: 0, check: 0, invalid: 0 };
+    for (const l of lineups) {
+      if (reviewing || (l.side === side && (!agentId || l.agent === agentId))) counts[valo.statusOf(l)]++;
+    }
+    setChildren(
+      statusRow,
+      h(
+        'div',
+        { class: 'chip-row' },
+        valo.STATUSES.map((st) =>
+          h(
+            'button',
+            {
+              class: `chip status-chip st-${st.id}${shownStatuses.has(st.id) ? ' active' : ''}`,
+              'aria-pressed': shownStatuses.has(st.id),
+              onClick: () => toggleStatus(st.id),
+            },
+            `${st.icon} ${st.label} ${counts[st.id]}`,
+          ),
+        ),
+      ),
+      reviewing
+        ? h('button', { class: 'chip ghost', onClick: endReview }, '見直しを終える')
+        : h('button', { class: 'chip ghost', onClick: reviewMenu }, '見直し'),
+    );
+  }
+
+  // マップのアップデート時の見直し
+  function reviewMenu() {
+    const ok = lineups.filter((l) => valo.statusOf(l) === 'ok');
+    const check = lineups.filter((l) => valo.statusOf(l) === 'check');
+    if (!lineups.length) return toast('このマップの定点はまだありません');
+    actionSheet(`${map.name} の定点の見直し（全 ${lineups.length} 件）`, [
+      ok.length && { label: `有効な ${ok.length} 件をすべて「要確認」にする`, onClick: () => markAllCheck(ok) },
+      check.length && { label: `要確認の ${check.length} 件を確認する`, onClick: startReview },
+    ].filter(Boolean));
+  }
+
+  async function markAllCheck(targets) {
+    const note = await askText({ title: '要確認にする理由（マップのアップデートなど）', value: `${map.name}のアップデート`, okLabel: '要確認にする' });
+    if (!note) return;
+    try {
+      await store.setStatus(groupId, targets.map((l) => l.id), 'check', note);
+      toast(`${targets.length} 件を要確認にしました`);
+      startReview();
+    } catch (e) {
+      showError(e);
+    }
+  }
+
+  function startReview() {
+    reviewing = true;
+    shownStatuses.clear();
+    shownStatuses.add('check');
+    saveStatuses();
+    selected = null;
+    render();
+  }
+
+  function endReview() {
+    reviewing = false;
+    shownStatuses.clear();
+    DEFAULT_STATUSES.forEach((st) => shownStatuses.add(st));
+    saveStatuses();
+    render();
+  }
+
+  // 着弾点のまとまりの状態：全部無効なら無効、1 つでも要確認があれば要確認
+  function clusterStatus(c) {
+    const sts = c.items.map(valo.statusOf);
+    if (sts.every((st) => st === 'invalid')) return 'invalid';
+    return sts.includes('check') ? 'check' : 'ok';
+  }
+
   function renderMap(list) {
     const clusters = clusterByTarget(list);
     if (pendingSelect) {
@@ -673,7 +775,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
         x: c.x,
         y: c.y,
         icon: agentId ? valo.abilityOf(l.agent, l.ability)?.icon : valo.agentById(l.agent)?.icon,
-        kind: `target${agentId ? '' : ' agent'}${selected === c ? ' selected' : ''}${c.items.some((i) => i.importance === 'essential') ? ' essential' : ''}`,
+        kind: `target st-${clusterStatus(c)}${agentId ? '' : ' agent'}${selected === c ? ' selected' : ''}${c.items.some((i) => i.importance === 'essential') ? ' essential' : ''}`,
         badge: c.items.length > 1 ? c.items.length : null,
         label: c.items.map((i) => i.title).join(' / '),
         onClick: () => {
@@ -695,12 +797,12 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     for (const c of clusters) {
       const state = !selected ? '' : selected === c ? ' selected' : ' dim';
       for (const l of c.items) {
-        lines.push({ from: l.from, to: l.to, kind: state.trim() });
+        lines.push({ from: l.from, to: l.to, kind: `st-${valo.statusOf(l)}${state}` });
         fromMarkers.push({
           x: l.from.x,
           y: l.from.y,
           icon: valo.agentById(l.agent)?.icon,
-          kind: `from${state}`,
+          kind: `from st-${valo.statusOf(l)}${state}`,
           label: `${l.title}（立ち位置）`,
           onClick: () => openDetail(groupId, l),
         });
@@ -711,9 +813,10 @@ function mapView(root, { groupId, mapId, side, agentId }) {
 
   function lineupCard(l) {
     const fav = prefs.favorites.includes(favKey(groupId, l.id));
-    return h(
+    const st = valo.statusOf(l);
+    const card = h(
       'button',
-      { class: 'lineup-card', onClick: () => openDetail(groupId, l) },
+      { class: `lineup-card st-${st}`, onClick: () => openDetail(groupId, l) },
       h('span', { class: 'lineup-card-icons' }, agentIcon(l.agent, 'agent-icon small'), abilityIcon(l.agent, l.ability)),
       h(
         'span',
@@ -722,15 +825,46 @@ function mapView(root, { groupId, mapId, side, agentId }) {
         h(
           'span',
           { class: 'lineup-card-sub' },
-          [valo.siteLabel(l.site), valo.label(valo.THROW_TYPES, l.throwType), l.createdByName].filter(Boolean).join(' ・ '),
+          [
+            reviewing ? `${valo.agentById(l.agent)?.name ?? ''} ${valo.label(valo.SIDES, l.side)}` : null,
+            valo.siteLabel(l.site),
+            valo.label(valo.THROW_TYPES, l.throwType),
+            l.createdByName,
+          ]
+            .filter(Boolean)
+            .join(' ・ '),
         ),
       ),
-      h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance)),
+      st === 'ok'
+        ? h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance))
+        : h('span', { class: `status-badge st-${st}` }, valo.label(valo.STATUSES, st)),
+    );
+    if (!reviewing) return card;
+    // 見直し中：その場で「有効」「無効」を決められるようにする
+    const decide = (next) =>
+      store.setStatus(groupId, [l.id], next, l.statusNote ?? '').then(() => toast(`「${l.title}」を${valo.label(valo.STATUSES, next)}にしました`), showError);
+    return h(
+      'div',
+      { class: 'review-item' },
+      card,
+      h(
+        'div',
+        { class: 'review-actions' },
+        h('button', { class: 'btn st-ok', onClick: () => decide('ok') }, '● 有効（使える）'),
+        h('button', { class: 'btn st-invalid', onClick: () => decide('invalid') }, '✕ 無効（使えない）'),
+      ),
     );
   }
 
   function renderList(list) {
     if (!loaded) return setChildren(listBox, h('div', { class: 'spinner small' }));
+    if (reviewing) {
+      return setChildren(
+        listBox,
+        h('p', { class: 'review-head' }, `${map.name} の見直し：画像や動画で確かめて、「有効」か「無効」を選んでください。`),
+        list.length ? list.map(lineupCard) : h('p', { class: 'list-hint' }, '表示する定点はありません。見直しが終わったら「見直しを終える」を押してください。'),
+      );
+    }
     if (mode === 'map' && selected) {
       return setChildren(listBox, h('p', { class: 'list-label' }, `この着弾点の定点（${selected.items.length}）`), selected.items.map(lineupCard));
     }
@@ -776,6 +910,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     renderAgents();
     renderAbilities();
     renderTools();
+    renderStatus();
     mv.el.classList.toggle('hidden-map', mode === 'list');
     renderMap(mode === 'map' ? list : []);
     renderList(list);
@@ -837,21 +972,23 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   };
 }
 
+// コンペのローテーション中のマップを上に、それ以外を下に分けて出す
 function pickMap(currentId) {
+  const tile = (m, close) =>
+    h(
+      'button',
+      { class: `map-tile${m.id === currentId ? ' active' : ''}`, onClick: () => close(m.id) },
+      h('img', { src: m.thumb, alt: '', loading: 'lazy' }),
+      h('span', {}, m.name),
+    );
+  const pool = master.maps.filter((m) => valo.isCompetitive(m.id));
+  const others = master.maps.filter((m) => !valo.isCompetitive(m.id));
   return openSheet((close) => [
     h('div', { class: 'sheet-title' }, 'マップを選ぶ'),
-    h(
-      'div',
-      { class: 'map-grid' },
-      master.maps.map((m) =>
-        h(
-          'button',
-          { class: `map-tile${m.id === currentId ? ' active' : ''}`, onClick: () => close(m.id) },
-          h('img', { src: m.thumb, alt: '', loading: 'lazy' }),
-          h('span', {}, m.name),
-        ),
-      ),
-    ),
+    h('p', { class: 'map-group-label' }, `コンペ（ローテーション中 ${pool.length}）`),
+    h('div', { class: 'map-grid' }, pool.map((m) => tile(m, close))),
+    others.length ? h('p', { class: 'map-group-label muted' }, 'ローテーション外') : null,
+    others.length ? h('div', { class: 'map-grid others' }, others.map((m) => tile(m, close))) : null,
     h('button', { class: 'sheet-action cancel', onClick: () => close(null) }, 'キャンセル'),
   ]);
 }
@@ -954,6 +1091,59 @@ async function copyToGroup(groupId, l) {
   }
 }
 
+// 詳細の「状態：有効 / 要確認 / 無効」。押すとその場で切り替わる
+function statusBox(groupId, l) {
+  const box = h('div', {});
+  function render() {
+    const st = valo.statusOf(l);
+    box.className = `status-box st-${st}`;
+    const when = l.statusAt ? new Date(l.statusAt).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '';
+    setChildren(
+      box,
+      h(
+        'div',
+        { class: 'status-row' },
+        h('span', { class: 'status-title' }, '状態'),
+        h(
+          'div',
+          { class: 'segmented status-seg' },
+          valo.STATUSES.map((s) =>
+            h(
+              'button',
+              {
+                class: `st-${s.id}${s.id === st ? ' active' : ''}`,
+                onClick: async () => {
+                  if (s.id === st) return;
+                  try {
+                    await store.setStatus(groupId, [l.id], s.id, s.id === 'ok' ? '' : l.statusNote ?? '');
+                    Object.assign(l, { status: s.id, statusNote: s.id === 'ok' ? '' : l.statusNote ?? '', statusByName: auth.displayName(), statusAt: Date.now() });
+                    render();
+                    toast(`${s.label}にしました`);
+                  } catch (e) {
+                    showError(e);
+                  }
+                },
+              },
+              `${s.icon} ${s.label}`,
+            ),
+          ),
+        ),
+      ),
+      st !== 'ok'
+        ? h(
+            'p',
+            { class: 'status-note' },
+            st === 'check' ? '⚠ マップの変更などで使えなくなっている可能性があります。' : '✕ この定点は使えません。',
+            l.statusNote ? `（${l.statusNote}）` : '',
+            l.statusByName ? ` ${when} ${l.statusByName}` : '',
+          )
+        : null,
+    );
+  }
+  render();
+  return box;
+}
+
 function openDetail(groupId, l) {
   const agent = valo.agentById(l.agent);
   const ability = valo.abilityOf(l.agent, l.ability);
@@ -1000,6 +1190,7 @@ function openDetail(groupId, l) {
         l.throwType ? h('span', { class: 'badge' }, valo.label(valo.THROW_TYPES, l.throwType)) : null,
         h('span', { class: 'badge muted' }, byLine),
       ),
+      statusBox(groupId, l),
       imageCarousel(groupId, l),
       l.notes ? h('p', { class: 'notes' }, l.notes) : null,
       embed

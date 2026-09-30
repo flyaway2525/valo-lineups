@@ -1783,3 +1783,209 @@ a {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+
+/* ---- 定点の状態（有効 / 要確認 / 無効） ---- */
+
+.status-chip.st-ok.active {
+  border-color: var(--from);
+  background: rgb(62 230 196 / 0.15);
+  color: var(--from);
+}
+
+.status-chip.st-check.active {
+  border-color: var(--gold);
+  background: var(--gold);
+  color: #1a1a1a;
+}
+
+.status-chip.st-invalid.active {
+  border-color: var(--muted);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* 地図のマーカー：要確認は金の枠と「!」、無効は灰色で半透明 */
+.marker.st-check {
+  border-color: var(--gold);
+}
+
+.marker.target.st-check::after {
+  content: '!';
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--gold);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 16px;
+  color: #1a1a1a;
+  text-align: center;
+}
+
+.marker.st-invalid {
+  border-color: #6b7580;
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+.map-line.st-check {
+  stroke: var(--gold);
+}
+
+.map-line.st-invalid {
+  stroke: #6b7580;
+  opacity: 0.4;
+}
+
+.map-line.st-check.selected {
+  stroke: var(--gold);
+}
+
+/* 一覧のカード */
+.lineup-card.st-check {
+  border-left: 4px solid var(--gold);
+}
+
+.lineup-card.st-invalid {
+  opacity: 0.55;
+}
+
+.lineup-card.st-invalid .lineup-card-title {
+  text-decoration: line-through;
+}
+
+.status-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-badge.st-check {
+  background: var(--gold);
+  color: #1a1a1a;
+}
+
+.status-badge.st-check::before {
+  content: '⚠ ';
+}
+
+.status-badge.st-invalid {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+/* 見直し */
+.review-head {
+  margin: 4px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  background: rgb(245 196 81 / 0.1);
+  font-size: 13px;
+  color: var(--gold);
+}
+
+.review-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.review-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.review-actions .btn {
+  height: 40px;
+  font-size: 14px;
+}
+
+.btn.st-ok {
+  color: var(--from);
+}
+
+.btn.st-invalid {
+  color: var(--muted);
+}
+
+/* 詳細の「状態」 */
+.status-box {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.status-box.st-check {
+  border-color: var(--gold);
+  background: rgb(245 196 81 / 0.08);
+}
+
+.status-box.st-invalid {
+  border-color: #6b7580;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.status-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.status-seg button {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.status-seg button.st-ok.active {
+  background: var(--from);
+  color: #0f1923;
+}
+
+.status-seg button.st-check.active {
+  background: var(--gold);
+  color: #1a1a1a;
+}
+
+.status-seg button.st-invalid.active {
+  background: #6b7580;
+  color: #fff;
+}
+
+.status-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* マップ選択：ローテーション中 / 外 */
+.map-group-label {
+  margin: 4px 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--from);
+}
+
+.map-group-label.muted {
+  color: var(--muted);
+}
+
+.map-grid.others .map-tile {
+  opacity: 0.7;
+}

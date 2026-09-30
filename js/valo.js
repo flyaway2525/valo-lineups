@@ -39,6 +39,27 @@ export const THROW_TYPES = [
 
 export const IMAGE_LABELS = ['立ち位置', '照準', '着弾'];
 
+// コンペのマップローテーション（API で取れないので手で更新する）
+// 更新日：2026-09-30、パッチ 13.04（V26 Act 5）
+// 出典：https://playvalorant.com/en-us/news/game-updates/valorant-patch-notes-13-04/
+export const COMPETITIVE_MAPS = ['abyss', 'ascent', 'haven', 'lotus', 'split', 'summit', 'sunset'];
+
+export function isCompetitive(mapId) {
+  return COMPETITIVE_MAPS.includes(mapId);
+}
+
+// 定点の状態。マップのアップデートで使えなくなったかもしれないものを「要確認」にする
+export const STATUSES = [
+  { id: 'ok', label: '有効', icon: '●' },
+  { id: 'check', label: '要確認', icon: '⚠' },
+  { id: 'invalid', label: '無効', icon: '✕' },
+];
+
+// 状態がない定点（古いデータ）は「有効」
+export function statusOf(lineup) {
+  return lineup.status ?? 'ok';
+}
+
 // "KAY/O" → "kayo" のように URL に使える形にする
 export function slug(name) {
   return name

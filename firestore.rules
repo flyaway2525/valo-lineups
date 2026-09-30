@@ -114,11 +114,29 @@ service cloud.firestore {
             && p.y is number && p.y >= 0 && p.y <= 1;
         }
 
+        // 状態（有効 / 要確認 / 無効）。古いデータには無いので、あるときだけ確かめる
+        function isValidStatus(d) {
+          return (!('status' in d) || d.status in ['ok', 'check', 'invalid'])
+            && (!('statusNote' in d) || (d.statusNote is string && d.statusNote.size() <= 200))
+            && (!('statusByName' in d) || (d.statusByName is string && d.statusByName.size() <= 40))
+            && (!('statusAt' in d) || d.statusAt is number);
+        }
+
+        // 状態だけを変える（内容の編集ではないので、更新者などは変えない）
+        function isStatusUpdate() {
+          let d = request.resource.data;
+          return d.diff(resource.data).affectedKeys().hasOnly(['status', 'statusNote', 'statusBy', 'statusByName', 'statusAt'])
+            && isValidStatus(d)
+            && d.statusBy == request.auth.uid;
+        }
+
         function isValidLineup(d) {
           return d.keys().hasOnly([
               'map', 'side', 'agent', 'ability', 'site', 'from', 'to',
               'title', 'notes', 'throwType', 'importance', 'videoUrl', 'imageIds',
-              'createdBy', 'createdByName', 'createdAt', 'updatedBy', 'updatedByName', 'updatedAt'])
+              'createdBy', 'createdByName', 'createdAt', 'updatedBy', 'updatedByName', 'updatedAt',
+              'status', 'statusNote', 'statusBy', 'statusByName', 'statusAt'])
+            && isValidStatus(d)
             && isNonEmptyString(d.map, 32)
             && d.side in ['atk', 'def']
             && isNonEmptyString(d.agent, 32)
@@ -143,10 +161,11 @@ service cloud.firestore {
           && isValidLineup(request.resource.data)
           && request.resource.data.createdBy == request.auth.uid;
         // メンバーなら誰でも編集できる。登録した人の情報は変えられない
-        allow update: if isGroupMember()
-          && isValidLineup(request.resource.data)
-          && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.createdAt == resource.data.createdAt;
+        allow update: if isGroupMember() && (
+          isStatusUpdate()
+          || (isValidLineup(request.resource.data)
+            && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.createdAt == resource.data.createdAt));
         allow delete: if isGroupMember();
       }
 
