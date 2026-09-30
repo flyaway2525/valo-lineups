@@ -1169,6 +1169,71 @@ a {
   display: none;
 }
 
+/* 画像の切り替えボタン（① 立ち位置 ② 照準 ③ 着弾） */
+.shot-steps {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.shot-step {
+  flex: 1;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.shot-step.active {
+  border-color: var(--from);
+  background: rgb(62 230 196 / 0.12);
+  color: var(--from);
+}
+
+.carousel-wrap {
+  position: relative;
+}
+
+.shot-arrow {
+  position: absolute;
+  top: 50%;
+  display: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.6);
+  font-size: 26px;
+  line-height: 1;
+  color: #fff;
+  transform: translateY(-50%);
+}
+
+.shot-arrow.prev {
+  left: 8px;
+}
+
+.shot-arrow.next {
+  right: 8px;
+}
+
+.shot-arrow:disabled {
+  display: none !important;
+}
+
+/* マウスのある端末だけ、画像に乗せたら矢印を出す */
+@media (hover: hover) {
+  .carousel-wrap:hover .shot-arrow {
+    display: grid;
+  }
+}
+
 .shot {
   position: relative;
   flex: 0 0 88%;

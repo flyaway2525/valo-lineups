@@ -848,22 +848,74 @@ function imageCarousel(groupId, l) {
   const ids = l.imageIds ?? [];
   const slots = valo.IMAGE_LABELS.map((label, i) => ({ label, id: ids[i] })).filter((s) => s.id);
   if (!slots.length) return null;
-  return h(
-    'div',
-    { class: 'carousel' },
-    slots.map(({ label, id }) => {
-      const fig = h('figure', { class: 'shot loading' }, h('figcaption', {}, label));
-      store
-        .getImage(groupId, id)
-        .then((img) => {
-          fig.classList.remove('loading');
-          if (!img) return fig.append(h('span', { class: 'shot-missing' }, '画像がありません'));
-          fig.prepend(h('img', { src: img.data, alt: label, onClick: () => openLightbox(img.data) }));
-        })
-        .catch(() => fig.append(h('span', { class: 'shot-missing' }, '読み込めませんでした')));
-      return fig;
-    }),
+
+  const figs = slots.map(({ label, id }) => {
+    const fig = h('figure', { class: 'shot loading' }, h('figcaption', {}, label));
+    store
+      .getImage(groupId, id)
+      .then((img) => {
+        fig.classList.remove('loading');
+        if (!img) return fig.append(h('span', { class: 'shot-missing' }, '画像がありません'));
+        fig.prepend(h('img', { src: img.data, alt: label, onClick: () => openLightbox(img.data) }));
+      })
+      .catch(() => fig.append(h('span', { class: 'shot-missing' }, '読み込めませんでした')));
+    return fig;
+  });
+  const track = h('div', { class: 'carousel' }, figs);
+  if (figs.length === 1) return track;
+
+  // 何枚目を見ているか（ボタン・ホイール・矢印・スワイプのどれで動かしても合わせる）
+  let index = 0;
+  const steps = slots.map(({ label }, i) =>
+    h('button', { type: 'button', class: `shot-step${i === 0 ? ' active' : ''}`, onClick: () => show(i) }, `${valo.IMAGE_LABELS.indexOf(label) + 1} ${label}`),
   );
+  const prev = h('button', { type: 'button', class: 'shot-arrow prev', 'aria-label': '前の画像', onClick: () => show(index - 1) }, '‹');
+  const next = h('button', { type: 'button', class: 'shot-arrow next', 'aria-label': '次の画像', onClick: () => show(index + 1) }, '›');
+
+  function mark(i) {
+    index = i;
+    steps.forEach((s, j) => s.classList.toggle('active', j === i));
+    prev.disabled = i === 0;
+    next.disabled = i === figs.length - 1;
+  }
+
+  // こちらから動かしている途中は、スクロール位置で番号を判定し直さない
+  let movingUntil = 0;
+  function show(i) {
+    if (i < 0 || i >= figs.length) return;
+    mark(i);
+    movingUntil = Date.now() + 700;
+    track.scrollTo({ left: figs[i].offsetLeft - figs[0].offsetLeft, behavior: 'smooth' });
+  }
+  track.addEventListener('scrollend', () => (movingUntil = 0));
+
+  // スワイプで動かしたときも、いちばん近い画像に合わせる
+  track.addEventListener('scroll', () => {
+    if (Date.now() < movingUntil) return;
+    const w = figs[1].offsetLeft - figs[0].offsetLeft;
+    const i = Math.round(track.scrollLeft / w);
+    if (i !== index && i >= 0 && i < figs.length) mark(i);
+  });
+
+  // ホイール：1 回ごとに 1 枚。端まで来たら、いつも通りシートを縦にスクロールさせる
+  let wheelLock = 0;
+  track.addEventListener(
+    'wheel',
+    (e) => {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // 横スクロールできるマウス・タッチパッドはそのまま
+      const dir = e.deltaY > 0 ? 1 : -1;
+      const target = index + dir;
+      if (target < 0 || target >= figs.length) return;
+      e.preventDefault();
+      if (Date.now() < wheelLock) return;
+      wheelLock = Date.now() + 350;
+      show(target);
+    },
+    { passive: false },
+  );
+
+  mark(0);
+  return h('div', { class: 'shots' }, h('div', { class: 'shot-steps' }, steps), h('div', { class: 'carousel-wrap' }, track, prev, next));
 }
 
 // 別のグループにコピーする
