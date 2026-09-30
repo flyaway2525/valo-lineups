@@ -1,19 +1,25 @@
-import { auth, store, demo } from './backend.js';
+import * as auth from './auth.js';
+import * as store from './store.js';
 import * as valo from './valo.js';
 import { h, setChildren, header, actionSheet, confirmSheet, askText, openSheet, toast, qrCode } from './ui.js';
 import { createMapView } from './mapview.js';
 import { compressImage, imageFromTransfer } from './images.js';
 
-const app = document.getElementById('app');
-const LAST_VIEW_KEY = 'last-view';
+// 画面の流れ
+//   グループ一覧（#/groups）→ グループのマップ（#/g/{id}/v/…）→ 定点の詳細（ボトムシート）
+//   アプリを開くと、前回のグループのマップを直接開く
 
-let master = null; // valo.js のマスタデータ
+const app = document.getElementById('app');
+const LAST_GROUP_KEY = 'last-group';
+const lastViewKey = (groupId) => `last-view:${groupId}`;
+
+let master = null; // valo.js のマスタデータ（false = 読み込み失敗）
 let user; // undefined = 確認中, null = 未ログイン
-let isAdmin = false;
 let authBusy = false; // ログイン処理の途中で画面が切り替わらないようにする
 let groups = []; // 参加中のグループ
+let groupsLoaded = false;
 let prefs = { favorites: [], shortcuts: [] };
-let pendingOpen = null; // 地図画面を開いたらすぐ詳細を出す定点（#/l/{id} や登録直後）
+let pendingOpen = null; // 地図画面を開いたらすぐ詳細を出す定点（共有リンクや登録直後）
 
 // グループ・お気に入りが変わったことを画面に知らせる
 const subscribers = new Set();
@@ -43,6 +49,22 @@ async function runAuth(fn) {
   }
 }
 
+function storageGet(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // 保存できなくても困らない
+  }
+}
+
 // ---- 表示用の小さな部品 ----
 
 function agentIcon(agentId, cls = 'agent-icon') {
@@ -55,29 +77,26 @@ function abilityIcon(agentId, slot, cls = 'ability-icon') {
   return ab?.icon ? h('img', { class: cls, src: ab.icon, alt: ab.name, draggable: 'false' }) : h('span', { class: cls }, slot[0]);
 }
 
-function visibilityLabel(l) {
-  if (l.visibility === 'public') return '全体公開';
-  if (l.visibility === 'group') return groups.find((g) => g.id === l.groupId)?.name ?? 'グループ';
-  return '自分だけ';
+function groupById(groupId) {
+  return groups.find((g) => g.id === groupId);
 }
 
-function viewHash({ mapId, side, agentId }) {
-  return `#/v/${mapId}/${side}${agentId ? `/${agentId}` : ''}`;
+function viewHash(groupId, { mapId, side, agentId }) {
+  return `#/g/${groupId}/v/${mapId}/${side}${agentId ? `/${agentId}` : ''}`;
 }
 
-function lastViewHash() {
-  try {
-    const v = JSON.parse(localStorage.getItem(LAST_VIEW_KEY));
-    if (v && valo.mapById(v.mapId)) return viewHash(v);
-  } catch {
-    // 保存がなければ最初のマップ
-  }
-  return viewHash({ mapId: master.maps[0].id, side: 'atk' });
+// グループの中で前回見ていたマップ・攻守・エージェント
+function lastViewHash(groupId) {
+  const v = storageGet(lastViewKey(groupId));
+  if (v && valo.mapById(v.mapId)) return viewHash(groupId, v);
+  return viewHash(groupId, { mapId: master.maps[0].id, side: 'atk' });
 }
 
-function lineupUrl(id) {
-  return `${location.origin}${location.pathname}#/l/${id}`;
+function lineupUrl(groupId, id) {
+  return `${location.origin}${location.pathname}#/g/${groupId}/l/${id}`;
 }
+
+const favKey = (groupId, id) => `${groupId}/${id}`;
 
 // YouTube のリンクなら埋め込み用 URL にする
 function youtubeEmbed(url) {
@@ -92,6 +111,15 @@ function youtubeEmbed(url) {
     return `https://www.youtube-nocookie.com/embed/${id}?rel=0&playsinline=1${start ? `&start=${start}` : ''}`;
   } catch {
     return null;
+  }
+}
+
+async function share(title, url, copiedMessage) {
+  if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+    await navigator.share({ title, url }).catch(() => {});
+  } else {
+    await navigator.clipboard.writeText(url).catch(() => {});
+    toast(copiedMessage);
   }
 }
 
@@ -110,10 +138,9 @@ async function renameAccount() {
   route();
 }
 
-function accountMenu() {
+function accountActions() {
   const guest = auth.isGuest();
-  actionSheet(`${auth.displayName()}${guest ? '（ゲスト）' : ''}${demo ? '（デモモード）' : ''}`, [
-    !demo && { label: 'グループ', onClick: () => (location.hash = '#/groups') },
+  return [
     { label: '名前を変更', onClick: renameAccount },
     guest && {
       label: 'Google アカウントに引き継ぐ',
@@ -124,29 +151,32 @@ function accountMenu() {
           toast('Google アカウントに引き継ぎました');
         }),
     },
-    !demo && {
-      label: 'ユーザーIDをコピー',
-      onClick: async () => {
-        await navigator.clipboard.writeText(auth.currentUser().uid).catch(() => {});
-        toast('コピーしました');
-      },
-    },
-    !demo && {
+    {
       label: 'ログアウト',
       danger: true,
       onClick: async () => {
-        if (guest && !(await confirmSheet('ゲストのままログアウトすると、登録した定点を編集できなくなります。ログアウトしますか？', 'ログアウト'))) return;
+        if (guest && !(await confirmSheet('ゲストのままログアウトすると、参加中のグループに戻れなくなります（招待リンクから再参加は可能）。ログアウトしますか？', 'ログアウト'))) return;
         await auth.signOut();
         location.hash = '#/';
       },
     },
-  ].filter(Boolean));
+  ].filter(Boolean);
+}
+
+function accountMenu() {
+  actionSheet(`${auth.displayName()}${auth.isGuest() ? '（ゲスト）' : ''}`, accountActions());
 }
 
 // ---- 画面：読み込み中・エラー ----
 
 function loadingView(root) {
   root.append(h('div', { class: 'center-screen' }, h('div', { class: 'spinner', 'aria-label': '読み込み中' })));
+}
+
+function messageView(root, message) {
+  root.append(
+    h('div', { class: 'center-screen' }, h('p', { class: 'welcome-text' }, message), h('a', { class: 'btn wide', href: '#/groups' }, 'グループ一覧へ')),
+  );
 }
 
 function masterErrorView(root) {
@@ -170,9 +200,9 @@ function welcomeView(root) {
       { class: 'center-screen' },
       h('img', { class: 'welcome-icon', src: 'icons/icon.svg', alt: '' }),
       h('h1', { class: 'welcome-title' }, 'valo-lineups'),
-      h('p', { class: 'welcome-text' }, 'VALORANT の定点を登録して、仲間と共有できます。'),
+      h('p', { class: 'welcome-text' }, 'VALORANT の定点を、グループの仲間と登録・共有できます。'),
       h('button', { class: 'btn primary wide', onClick: () => runAuth(auth.signInWithGoogle) }, 'Google でログイン'),
-      h('p', { class: 'welcome-note' }, 'PC で登録してスマホで見るなら、Google ログインがおすすめです。'),
+      h('p', { class: 'welcome-note' }, 'PC とスマホで使うなら、Google ログインがおすすめです。グループを作れるのも Google ログインの人だけです。'),
       h('div', { class: 'divider' }, 'または'),
       h(
         'form',
@@ -206,7 +236,7 @@ function nameSetupView(root) {
       { class: 'center-screen' },
       h('img', { class: 'welcome-icon', src: 'icons/icon.svg', alt: '' }),
       h('h1', { class: 'welcome-title' }, 'はじめまして'),
-      h('p', { class: 'welcome-text' }, '定点の作者として表示する名前を入力してください。あとから変更できます。'),
+      h('p', { class: 'welcome-text' }, 'グループの中で表示する名前を入力してください。あとから変更できます。'),
       h(
         'form',
         {
@@ -250,7 +280,7 @@ function joinView(root, { groupId, code }) {
       .catch((e) => {
         console.error(e);
         status.textContent = '招待リンクが無効です。リンクが作り直された可能性があるので、招待してくれた人に新しいリンクをもらってください。';
-        box.append(h('a', { class: 'btn wide', href: '#/' }, 'ホームへ'));
+        box.append(h('a', { class: 'btn wide', href: '#/groups' }, 'グループ一覧へ'));
       });
     return;
   }
@@ -281,14 +311,100 @@ function joinView(root, { groupId, code }) {
   );
 }
 
-// ---- 画面：定点マップ（メイン） ----
+// ---- 画面：グループ一覧 ----
+
+function groupsView(root) {
+  const body = h('main', { class: 'content' });
+  root.append(header({ title: 'valo-lineups', onMenu: accountMenu }), body);
+  const last = storageGet(LAST_GROUP_KEY);
+
+  function render() {
+    if (!groupsLoaded) return setChildren(body, h('div', { class: 'spinner' }));
+    setChildren(
+      body,
+      h('p', { class: 'section-label' }, 'グループを選んでください'),
+      groups.length
+        ? h(
+            'div',
+            { class: 'card-list' },
+            groups.map((g) =>
+              h(
+                'a',
+                { class: `card${g.id === last ? ' current' : ''}`, href: `#/g/${g.id}` },
+                h('span', { class: 'card-icon' }, g.name.slice(0, 1)),
+                h(
+                  'span',
+                  { class: 'card-main' },
+                  h('span', { class: 'card-title' }, g.name),
+                  h('span', { class: 'card-sub' }, `${g.memberIds.length} 人${g.members[auth.currentUser().uid]?.role === 'owner' ? ' ・ オーナー' : ''}`),
+                ),
+                h('span', { class: 'chevron' }, '›'),
+              ),
+            ),
+          )
+        : h('p', { class: 'empty' }, 'まだグループに参加していません。仲間から届いた招待リンクを開くか、グループを作成してください。'),
+      auth.isGuest()
+        ? h('p', { class: 'notice' }, 'グループを作るには、Google アカウントでログインしてください（右上の ⋯ →「Google アカウントに引き継ぐ」）。')
+        : h(
+            'button',
+            {
+              class: 'add-card',
+              onClick: async () => {
+                const name = await askText({ title: 'グループの名前', placeholder: '例：いつものフルパ、ソロ練用', okLabel: '作成' });
+                if (!name) return;
+                try {
+                  const id = await store.createGroup(name);
+                  location.hash = `#/g/${id}`;
+                } catch (e) {
+                  showError(e);
+                }
+              },
+            },
+            '＋ グループを作成',
+          ),
+    );
+  }
+  render();
+  return subscribe(render);
+}
+
+// グループの画面を開く前に、そのグループが読めるのを待つ
+// （招待リンクから参加した直後は、グループ一覧への反映が少し遅れる）
+function withGroup(root, groupId, build) {
+  let inner = null;
+  let timer = null;
+  let unsub = null;
+  const tryBuild = () => {
+    if (!groupById(groupId)) return false;
+    clearTimeout(timer);
+    unsub?.();
+    root.replaceChildren();
+    storageSet(LAST_GROUP_KEY, groupId);
+    inner = build(groupById(groupId)) ?? null;
+    return true;
+  };
+  if (!tryBuild()) {
+    loadingView(root);
+    unsub = subscribe(tryBuild);
+    timer = setTimeout(() => {
+      unsub?.();
+      root.replaceChildren();
+      messageView(root, 'このグループは見つからないか、メンバーではありません。');
+    }, groupsLoaded ? 6000 : 15000);
+  }
+  return () => {
+    clearTimeout(timer);
+    unsub?.();
+    inner?.();
+  };
+}
+
+// ---- 画面：グループのマップ（メイン） ----
 
 const SOURCES = [
   { id: 'all', label: 'すべて' },
-  { id: 'mine', label: '自分' },
-  { id: 'group', label: 'グループ' },
-  { id: 'public', label: '公開' },
-  { id: 'fav', label: '★' },
+  { id: 'mine', label: '自分が登録' },
+  { id: 'fav', label: '★ お気に入り' },
 ];
 
 // 着弾点の近い定点を 1 つのマーカーにまとめる
@@ -302,28 +418,35 @@ function clusterByTarget(lineups) {
   return clusters;
 }
 
-function mapView(root, { mapId, side, agentId }) {
+function groupMenu(groupId) {
+  const g = groupById(groupId);
+  actionSheet(`${g?.name ?? 'グループ'} ・ ${auth.displayName()}${auth.isGuest() ? '（ゲスト）' : ''}`, [
+    { label: 'メンバー・招待', onClick: () => (location.hash = `#/g/${groupId}/settings`) },
+    { label: 'グループを切り替え', onClick: () => (location.hash = '#/groups') },
+    ...accountActions(),
+  ]);
+}
+
+function mapView(root, { groupId, mapId, side, agentId }) {
   const map = valo.mapById(mapId);
   if (!map) {
-    location.replace(viewHash({ mapId: master.maps[0].id, side: 'atk' }));
+    location.replace(viewHash(groupId, { mapId: master.maps[0].id, side: 'atk' }));
     return;
   }
   if (agentId && !valo.agentById(agentId)) agentId = null;
-  try {
-    localStorage.setItem(LAST_VIEW_KEY, JSON.stringify({ mapId, side, agentId }));
-  } catch {
-    // 保存できなくても困らない
-  }
+  storageSet(lastViewKey(groupId), { mapId, side, agentId });
 
   let lineups = [];
   let source = sessionStorage.getItem('source') ?? 'all';
-  let hiddenSlots = new Set();
+  if (!SOURCES.some((s) => s.id === source)) source = 'all';
+  const hiddenSlots = new Set();
   let selected = null; // 選んでいる着弾点のクラスター
+  let pendingSelect = null; // 次の描画で選ぶ着弾点
   let mode = sessionStorage.getItem('mode') ?? 'map';
   let loaded = false;
   const me = auth.currentUser().uid;
 
-  const go = (next) => location.replace(viewHash({ mapId, side, agentId, ...next }));
+  const go = (next) => location.replace(viewHash(groupId, { mapId, side, agentId, ...next }));
 
   // 表示する定点（地図とリストで共通）
   function visible() {
@@ -333,22 +456,27 @@ function mapView(root, { mapId, side, agentId }) {
         (!agentId || l.agent === agentId) &&
         !hiddenSlots.has(l.ability) &&
         (source === 'all' ||
-          (source === 'mine' && l.ownerId === me) ||
-          (source === 'group' && l.visibility === 'group') ||
-          (source === 'public' && l.visibility === 'public') ||
-          (source === 'fav' && prefs.favorites.includes(l.id))),
+          (source === 'mine' && l.createdBy === me) ||
+          (source === 'fav' && prefs.favorites.includes(favKey(groupId, l.id)))),
     );
   }
 
   // ---- 上部 ----
+  const groupLabel = h('span', { class: 'group-label' });
   const topbar = h(
     'header',
     { class: 'topbar map-topbar' },
+    h('a', { class: 'topbar-btn back', href: '#/groups', 'aria-label': 'グループ一覧へ' }, '‹'),
     h(
-      'button',
-      { class: 'map-picker', onClick: () => pickMap(mapId).then((id) => id && go({ mapId: id })) },
-      h('span', { class: 'map-picker-name' }, map.name),
-      h('span', { class: 'caret' }, '▾'),
+      'div',
+      { class: 'map-title' },
+      groupLabel,
+      h(
+        'button',
+        { class: 'map-picker', onClick: () => pickMap(mapId).then((id) => id && go({ mapId: id })) },
+        h('span', { class: 'map-picker-name' }, map.name),
+        h('span', { class: 'caret' }, '▾'),
+      ),
     ),
     h(
       'div',
@@ -357,8 +485,12 @@ function mapView(root, { mapId, side, agentId }) {
         h('button', { class: sd.id === side ? 'active' : '', role: 'tab', 'aria-selected': sd.id === side, onClick: () => go({ side: sd.id }) }, sd.label),
       ),
     ),
-    h('a', { class: 'topbar-btn add-btn', href: `#/new/${mapId}/${side}${agentId ? `/${agentId}` : ''}`, 'aria-label': '定点を登録', title: '定点を登録' }, '＋'),
-    h('button', { class: 'topbar-btn', onClick: accountMenu, 'aria-label': 'メニュー' }, '⋯'),
+    h(
+      'a',
+      { class: 'topbar-btn add-btn', href: `#/g/${groupId}/new/${mapId}/${side}${agentId ? `/${agentId}` : ''}`, 'aria-label': '定点を登録', title: '定点を登録' },
+      '＋',
+    ),
+    h('button', { class: 'topbar-btn', onClick: () => groupMenu(groupId), 'aria-label': 'メニュー' }, '⋯'),
   );
 
   // ---- 地図 ----
@@ -373,19 +505,23 @@ function mapView(root, { mapId, side, agentId }) {
   const listBox = h('div', { class: 'lineup-list' });
   const panel = h('section', { class: 'panel' }, shortcutRow, agentStrip, abilityRow, toolRow, listBox);
 
-  root.append(h('div', { class: `map-screen${demo ? ' has-demo' : ''}` }, demo ? demoBanner() : null, topbar, h('div', { class: 'map-wrap' }, mv.el), panel));
+  root.append(h('div', { class: 'map-screen' }, topbar, h('div', { class: 'map-wrap' }, mv.el), panel));
+
+  function renderHeader() {
+    groupLabel.textContent = groupById(groupId)?.name ?? '';
+  }
 
   function renderShortcuts() {
-    const current = prefs.shortcuts.find((s) => s.mapId === mapId && s.side === side && s.agentId === agentId);
+    const mine = prefs.shortcuts.filter((s) => s.groupId === groupId);
+    const current = mine.find((s) => s.mapId === mapId && s.side === side && s.agentId === agentId);
     setChildren(
       shortcutRow,
-      prefs.shortcuts.map((s) => {
+      mine.map((s) => {
         const m = valo.mapById(s.mapId);
         if (!m) return null;
-        const active = s === current;
         return h(
           'a',
-          { class: `chip shortcut${active ? ' active' : ''}`, href: viewHash(s) },
+          { class: `chip shortcut${s === current ? ' active' : ''}`, href: viewHash(groupId, s) },
           s.agentId ? agentIcon(s.agentId, 'chip-icon') : null,
           `${m.name} ${valo.label(valo.SIDES, s.side)}`,
         );
@@ -398,7 +534,7 @@ function mapView(root, { mapId, side, agentId }) {
             onClick: async () => {
               const next = current
                 ? prefs.shortcuts.filter((s) => s !== current)
-                : [...prefs.shortcuts, { mapId, side, agentId }].slice(-12);
+                : [...prefs.shortcuts, { groupId, mapId, side, agentId }].slice(-12);
               await store.setShortcuts(next).catch(showError);
               toast(current ? 'ショートカットから外しました' : 'ショートカットに追加しました');
             },
@@ -406,7 +542,7 @@ function mapView(root, { mapId, side, agentId }) {
           current ? '− 外す' : '＋ ショートカット',
         ),
     );
-    shortcutRow.hidden = !prefs.shortcuts.length && !agentId;
+    shortcutRow.hidden = !mine.length && !agentId;
   }
 
   function renderAgents() {
@@ -466,7 +602,7 @@ function mapView(root, { mapId, side, agentId }) {
       h(
         'div',
         { class: 'chip-row' },
-        SOURCES.filter((s) => !demo || s.id === 'all' || s.id === 'fav').map((s) =>
+        SOURCES.map((s) =>
           h(
             'button',
             {
@@ -499,10 +635,13 @@ function mapView(root, { mapId, side, agentId }) {
 
   function renderMap(list) {
     const clusters = clusterByTarget(list);
-    if (selected) {
+    if (pendingSelect) {
+      const p = pendingSelect;
+      pendingSelect = null;
+      selected = clusters.find((c) => Math.hypot(c.x - p.x, c.y - p.y) < 0.02) ?? null;
+    } else if (selected) {
       // 選んでいたクラスターを最新の定点で作り直す
-      const again = clusters.find((c) => Math.hypot(c.x - selected.x, c.y - selected.y) < 0.02);
-      selected = again ?? null;
+      selected = clusters.find((c) => Math.hypot(c.x - selected.x, c.y - selected.y) < 0.02) ?? null;
     }
     const markers = clusters.map((c) => {
       const l = c.items[0];
@@ -515,14 +654,14 @@ function mapView(root, { mapId, side, agentId }) {
         label: c.items.map((i) => i.title).join(' / '),
         onClick: () => {
           if (!agentId && new Set(c.items.map((i) => i.agent)).size === 1) {
-            // エージェント未選択なら、まずそのエージェントに絞る
-            pendingSelect = { x: c.x, y: c.y };
+            // エージェント未選択なら、まずそのエージェントに絞って、この着弾点を選んだ状態にする
+            sessionStorage.setItem('pendingSelect', JSON.stringify({ x: c.x, y: c.y }));
             go({ agentId: l.agent });
             return;
           }
           selected = selected === c ? null : c;
           render();
-          if (selected && c.items.length === 1) openDetail(c.items[0]);
+          if (selected && c.items.length === 1) openDetail(groupId, c.items[0]);
         },
       };
     });
@@ -536,7 +675,7 @@ function mapView(root, { mapId, side, agentId }) {
           icon: valo.agentById(l.agent)?.icon,
           kind: 'from',
           label: `${l.title}（立ち位置）`,
-          onClick: () => openDetail(l),
+          onClick: () => openDetail(groupId, l),
         });
       }
     }
@@ -544,10 +683,10 @@ function mapView(root, { mapId, side, agentId }) {
   }
 
   function lineupCard(l) {
-    const fav = prefs.favorites.includes(l.id);
+    const fav = prefs.favorites.includes(favKey(groupId, l.id));
     return h(
       'button',
-      { class: 'lineup-card', onClick: () => openDetail(l) },
+      { class: 'lineup-card', onClick: () => openDetail(groupId, l) },
       h('span', { class: 'lineup-card-icons' }, agentIcon(l.agent, 'agent-icon small'), abilityIcon(l.agent, l.ability)),
       h(
         'span',
@@ -556,7 +695,7 @@ function mapView(root, { mapId, side, agentId }) {
         h(
           'span',
           { class: 'lineup-card-sub' },
-          [valo.siteLabel(l.site), valo.label(valo.THROW_TYPES, l.throwType), l.ownerId === me ? null : l.ownerName].filter(Boolean).join(' ・ '),
+          [valo.siteLabel(l.site), valo.label(valo.THROW_TYPES, l.throwType), l.createdByName].filter(Boolean).join(' ・ '),
         ),
       ),
       h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance)),
@@ -580,7 +719,9 @@ function mapView(root, { mapId, side, agentId }) {
               : `${list.length} 件。エージェントを選ぶか、地図のアイコンをタップしてください。`
             : agentId
               ? 'この条件の定点はまだありません。右上の ＋ から登録できます。'
-              : 'エージェントを選んでください。',
+              : lineups.length
+                ? 'エージェントを選んでください。'
+                : 'このマップの定点はまだありません。右上の ＋ から登録できます。',
         ),
       );
     }
@@ -603,6 +744,7 @@ function mapView(root, { mapId, side, agentId }) {
 
   function render() {
     const list = visible();
+    renderHeader();
     renderShortcuts();
     renderAgents();
     renderAbilities();
@@ -612,54 +754,38 @@ function mapView(root, { mapId, side, agentId }) {
     renderList(list);
   }
 
-  // 定点の監視（グループが増減したら張り直す）
-  let unwatch = null;
-  let watchedGroups = '';
-  function watchLineups() {
-    const ids = groups.map((g) => g.id);
-    if (unwatch && ids.join() === watchedGroups) return;
-    watchedGroups = ids.join();
-    unwatch?.();
-    unwatch = store.watchLineups(
-      mapId,
-      ids,
-      (list) => {
-        lineups = list;
-        loaded = true;
-        applyPending();
-        render();
-      },
-      showError,
-    );
-  }
-
-  // 他の画面から渡された「この定点を開いて」「この着弾点を選んで」を処理する
-  let pendingSelect = null;
-  function applyPending() {
-    if (pendingSelect) {
-      const p = pendingSelect;
-      pendingSelect = null;
-      selected = clusterByTarget(visible()).find((c) => Math.hypot(c.x - p.x, c.y - p.y) < 0.02) ?? null;
-    }
-  }
-  if (pendingOpen && pendingOpen.map === mapId) {
-    const l = pendingOpen;
+  // 他の画面から渡された「この定点を開いて」「この着弾点を選んで」
+  if (pendingOpen && pendingOpen.groupId === groupId && pendingOpen.lineup.map === mapId) {
+    const l = pendingOpen.lineup;
     pendingOpen = null;
     pendingSelect = l.to;
-    queueMicrotask(() => openDetail(l));
+    queueMicrotask(() => openDetail(groupId, l));
   }
-  if (sessionStorage.getItem('pendingSelect')) {
-    pendingSelect = JSON.parse(sessionStorage.getItem('pendingSelect'));
+  const saved = sessionStorage.getItem('pendingSelect');
+  if (saved) {
+    pendingSelect = JSON.parse(saved);
     sessionStorage.removeItem('pendingSelect');
   }
 
-  watchLineups();
+  const unwatch = store.watchLineups(
+    groupId,
+    mapId,
+    (list) => {
+      lineups = list;
+      loaded = true;
+      render();
+    },
+    showError,
+  );
+
   render();
   // 選んでいるエージェントが横スクロールの外にあれば見える位置へ
   const activeAgent = agentStrip.querySelector('.active');
   if (activeAgent) agentStrip.scrollLeft = activeAgent.offsetLeft - agentStrip.clientWidth / 2 + activeAgent.clientWidth / 2;
+
   const unsub = subscribe(() => {
-    watchLineups();
+    // グループから抜けた・グループが消えた
+    if (groupsLoaded && !groupById(groupId)) return location.replace('#/groups');
     render();
   });
 
@@ -680,16 +806,10 @@ function mapView(root, { mapId, side, agentId }) {
   document.addEventListener('keydown', onKey);
 
   return () => {
-    unwatch?.();
+    unwatch();
     unsub();
     document.removeEventListener('keydown', onKey);
-    // 別エージェントに切り替えたときに、選んでいた着弾点を引き継ぐ
-    if (pendingSelect) sessionStorage.setItem('pendingSelect', JSON.stringify(pendingSelect));
   };
-}
-
-function demoBanner() {
-  return h('div', { class: 'demo-banner' }, 'デモモード：データはこのブラウザの中だけに保存されます');
 }
 
 function pickMap(currentId) {
@@ -718,7 +838,7 @@ function openLightbox(src) {
   document.body.append(box);
 }
 
-function imageCarousel(l) {
+function imageCarousel(groupId, l) {
   const ids = l.imageIds ?? [];
   const slots = valo.IMAGE_LABELS.map((label, i) => ({ label, id: ids[i] })).filter((s) => s.id);
   if (!slots.length) return null;
@@ -728,7 +848,7 @@ function imageCarousel(l) {
     slots.map(({ label, id }) => {
       const fig = h('figure', { class: 'shot loading' }, h('figcaption', {}, label));
       store
-        .getImage(id)
+        .getImage(groupId, id)
         .then((img) => {
           fig.classList.remove('loading');
           if (!img) return fig.append(h('span', { class: 'shot-missing' }, '画像がありません'));
@@ -740,26 +860,43 @@ function imageCarousel(l) {
   );
 }
 
-function openDetail(l) {
-  const me = auth.currentUser().uid;
-  const mine = l.ownerId === me;
+// 別のグループにコピーする
+async function copyToGroup(groupId, l) {
+  const others = groups.filter((g) => g.id !== groupId);
+  const target = await openSheet((close) => [
+    h('div', { class: 'sheet-title' }, 'どのグループにコピーしますか？'),
+    others.map((g) => h('button', { class: 'sheet-action', onClick: () => close(g) }, g.name)),
+    h('button', { class: 'sheet-action cancel', onClick: () => close(null) }, 'キャンセル'),
+  ]);
+  if (!target) return;
+  try {
+    await store.copyLineup(groupId, l, target.id);
+    toast(`「${target.name}」にコピーしました`);
+  } catch (e) {
+    showError(e);
+  }
+}
+
+function openDetail(groupId, l) {
   const agent = valo.agentById(l.agent);
   const ability = valo.abilityOf(l.agent, l.ability);
   const embed = l.videoUrl && youtubeEmbed(l.videoUrl);
+  const key = favKey(groupId, l.id);
+  const byLine = [`登録：${l.createdByName}`, l.updatedBy && l.updatedBy !== l.createdBy ? `更新：${l.updatedByName}` : null].filter(Boolean).join(' ・ ');
 
   return openSheet((close) => {
     const favBtn = h('button', { class: 'btn' });
     const renderFav = () => {
-      const on = prefs.favorites.includes(l.id);
-      favBtn.textContent = on ? '★ お気に入り済み' : '☆ お気に入り';
+      const on = prefs.favorites.includes(key);
+      favBtn.textContent = on ? '★ お気に入り' : '☆ お気に入り';
       favBtn.classList.toggle('on', on);
     };
     renderFav();
     favBtn.addEventListener('click', async () => {
-      const on = !prefs.favorites.includes(l.id);
-      prefs = { ...prefs, favorites: on ? [...prefs.favorites, l.id] : prefs.favorites.filter((x) => x !== l.id) };
+      const on = !prefs.favorites.includes(key);
+      prefs = { ...prefs, favorites: on ? [...prefs.favorites, key] : prefs.favorites.filter((x) => x !== key) };
       renderFav();
-      await store.setFavorite(l.id, on).catch(showError);
+      await store.setFavorite(key, on).catch(showError);
     });
 
     return [
@@ -784,10 +921,9 @@ function openDetail(l) {
         { class: 'badges' },
         h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance)),
         l.throwType ? h('span', { class: 'badge' }, valo.label(valo.THROW_TYPES, l.throwType)) : null,
-        h('span', { class: 'badge muted' }, visibilityLabel(l)),
-        mine ? null : h('span', { class: 'badge muted' }, `by ${l.ownerName}`),
+        h('span', { class: 'badge muted' }, byLine),
       ),
-      imageCarousel(l),
+      imageCarousel(groupId, l),
       l.notes ? h('p', { class: 'notes' }, l.notes) : null,
       embed
         ? h('div', { class: 'video' }, h('iframe', { src: embed, title: '動画', allow: 'encrypted-media; picture-in-picture; fullscreen', allowfullscreen: true, loading: 'lazy' }))
@@ -798,106 +934,83 @@ function openDetail(l) {
         'div',
         { class: 'detail-actions' },
         favBtn,
-        h(
-          'button',
-          {
-            class: 'btn',
-            onClick: async () => {
-              const url = lineupUrl(l.id);
-              if (navigator.share && matchMedia('(pointer: coarse)').matches) {
-                await navigator.share({ title: l.title, url }).catch(() => {});
-              } else {
-                await navigator.clipboard.writeText(url).catch(() => {});
-                toast('リンクをコピーしました');
-              }
-            },
-          },
-          'リンク',
-        ),
-        mine
-          ? h('a', { class: 'btn', href: `#/edit/${l.id}`, onClick: () => close(null) }, '編集')
-          : h(
-              'button',
-              {
-                class: 'btn',
-                onClick: async () => {
-                  try {
-                    await store.copyLineup(l);
-                    toast('自分の定点にコピーしました（自分だけに公開）');
-                  } catch (e) {
-                    showError(e);
-                  }
-                },
-              },
-              'コピー',
-            ),
-        mine
+        h('button', { class: 'btn', onClick: () => share(l.title, lineupUrl(groupId, l.id), 'リンクをコピーしました') }, 'リンク'),
+        h('a', { class: 'btn', href: `#/g/${groupId}/edit/${l.id}`, onClick: () => close(null) }, '編集'),
+        groups.length > 1
           ? h(
               'button',
               {
-                class: 'btn danger',
-                onClick: async () => {
+                class: 'btn',
+                onClick: () => {
                   close(null);
-                  if (!(await confirmSheet(`「${l.title}」を削除しますか？`))) return;
-                  try {
-                    await store.deleteLineup(l);
-                    if (prefs.favorites.includes(l.id)) store.setFavorite(l.id, false).catch(() => {});
-                    toast('削除しました');
-                  } catch (e) {
-                    showError(e);
-                  }
+                  copyToGroup(groupId, l);
                 },
               },
-              '削除',
+              '別グループへ',
             )
           : null,
+        h(
+          'button',
+          {
+            class: 'btn danger',
+            onClick: async () => {
+              close(null);
+              if (!(await confirmSheet(`「${l.title}」を削除しますか？（グループの全員から見えなくなります）`))) return;
+              try {
+                await store.deleteLineup(groupId, l);
+                if (prefs.favorites.includes(key)) store.setFavorite(key, false).catch(() => {});
+                toast('削除しました');
+              } catch (e) {
+                showError(e);
+              }
+            },
+          },
+          '削除',
+        ),
       ),
     ];
   });
 }
 
-// #/l/{id}：共有リンク。定点を読んで、その地図画面で詳細を開く
-function lineupLinkView(root, { id }) {
+// #/g/{groupId}/l/{id}：共有リンク。定点を読んで、その地図画面で詳細を開く
+function lineupLinkView(root, { groupId, id }) {
   loadingView(root);
   let alive = true;
   store
-    .getLineup(id)
+    .getLineup(groupId, id)
     .then((l) => {
       if (!alive) return;
       if (!l) throw new Error('not-found');
-      pendingOpen = { ...l, id };
-      location.replace(viewHash({ mapId: l.map, side: l.side, agentId: l.agent }));
+      pendingOpen = { groupId, lineup: l };
+      location.replace(viewHash(groupId, { mapId: l.map, side: l.side, agentId: l.agent }));
     })
     .catch((e) => {
       if (!alive) return;
       console.error(e);
-      root.replaceChildren(
-        h(
-          'div',
-          { class: 'center-screen' },
-          h('p', { class: 'welcome-text' }, 'この定点は見つからないか、見る権限がありません（グループ限定の定点は、そのグループに参加すると見られます）。'),
-          h('a', { class: 'btn wide', href: '#/' }, 'ホームへ'),
-        ),
-      );
+      root.replaceChildren();
+      messageView(root, 'この定点は見つからないか、見る権限がありません（そのグループに参加すると見られます）。');
     });
   return () => (alive = false);
 }
 
 // ---- 画面：定点の登録・編集 ----
 
-function editorView(root, { id, mapId, side, agentId }) {
+function editorView(root, { groupId, id, mapId, side, agentId }) {
+  const group = groupById(groupId);
   const body = h('main', { class: 'editor' });
-  root.append(header({ title: id ? '定点を編集' : '定点を登録', back: lastViewHash() }), body);
-  if (demo) root.prepend(demoBanner());
+  root.append(
+    header({ title: id ? '定点を編集' : '定点を登録', back: lastViewHash(groupId) }),
+    h('div', { class: 'editor-group' }, '登録先のグループ：', h('strong', {}, group.name), '（メンバー全員が見られて、編集もできます）'),
+    body,
+  );
 
   let alive = true;
   let unmountPaste = null;
 
   const init = id
-    ? store.getLineup(id).then((l) => {
+    ? store.getLineup(groupId, id).then((l) => {
         if (!l) throw new Error('定点が見つかりません');
-        if (l.ownerId !== auth.currentUser().uid) throw new Error('自分の定点だけ編集できます');
-        return { ...l, id };
+        return l;
       })
     : Promise.resolve(null);
 
@@ -905,11 +1018,11 @@ function editorView(root, { id, mapId, side, agentId }) {
   init
     .then((orig) => {
       if (!alive) return;
-      unmountPaste = buildEditor(body, orig, { mapId, side, agentId });
+      unmountPaste = buildEditor(body, groupId, orig, { mapId, side, agentId });
     })
     .catch((e) => {
       if (!alive) return;
-      setChildren(body, h('p', { class: 'empty' }, e.message), h('a', { class: 'btn', href: '#/' }, 'ホームへ'));
+      setChildren(body, h('p', { class: 'empty' }, e.message), h('a', { class: 'btn', href: `#/g/${groupId}` }, '戻る'));
     });
 
   return () => {
@@ -934,7 +1047,7 @@ function selectEl(options, value, onChange) {
   );
 }
 
-function buildEditor(body, orig, defaults) {
+function buildEditor(body, groupId, orig, defaults) {
   const f = {
     map: orig?.map ?? defaults.mapId ?? master.maps[0].id,
     side: orig?.side ?? defaults.side ?? 'atk',
@@ -948,8 +1061,6 @@ function buildEditor(body, orig, defaults) {
     throwType: orig?.throwType ?? 'normal',
     importance: orig?.importance ?? 'useful',
     videoUrl: orig?.videoUrl ?? '',
-    visibility: orig?.visibility ?? (demo ? 'private' : groups.length ? 'group' : 'private'),
-    groupId: orig?.groupId ?? groups[0]?.id ?? null,
   };
   // 画像の 3 枠：{ id } = 保存済み、{ data, w, h } = 新しく追加、null = 空
   const slots = [0, 1, 2].map((i) => (orig?.imageIds?.[i] ? { id: orig.imageIds[i] } : null));
@@ -992,7 +1103,6 @@ function buildEditor(body, orig, defaults) {
   videoInput.value = f.videoUrl;
   videoInput.addEventListener('input', () => (f.videoUrl = videoInput.value.trim()));
   const shotsBox = h('div', { class: 'shots-edit' });
-  const visibilityBox = h('div');
   const saveBtn = h('button', { class: 'btn primary wide', onClick: save }, orig ? '保存' : '登録');
 
   const fileInput = h('input', { type: 'file', accept: 'image/*', hidden: true });
@@ -1029,7 +1139,6 @@ function buildEditor(body, orig, defaults) {
         field('画像（Ctrl+V で貼り付け・ドロップ・タップで選択）', shotsBox, fileInput),
         field('メモ', notesInput),
         field('動画', videoInput),
-        field('公開範囲', visibilityBox),
         saveBtn,
       ),
     ),
@@ -1192,7 +1301,7 @@ function buildEditor(body, orig, defaults) {
         if (slot) {
           const img = h('img', { alt: label });
           if (slot.data) img.src = slot.data;
-          else store.getImage(slot.id).then((d) => d && (img.src = d.data));
+          else store.getImage(groupId, slot.id).then((d) => d && (img.src = d.data));
           box.append(
             img,
             h(
@@ -1234,29 +1343,6 @@ function buildEditor(body, orig, defaults) {
     }
   }
 
-  function renderVisibility() {
-    const options = [
-      { id: 'private', label: '自分だけ' },
-      ...(demo ? [] : [{ id: 'group', label: 'グループ' }, { id: 'public', label: '全体公開（ログインした人全員）' }]),
-    ];
-    setChildren(
-      visibilityBox,
-      selectEl(options, f.visibility, (v) => {
-        f.visibility = v;
-        renderVisibility();
-      }),
-      f.visibility === 'group'
-        ? groups.length
-          ? selectEl(
-              groups.map((g) => ({ id: g.id, label: g.name })),
-              f.groupId,
-              (v) => (f.groupId = v),
-            )
-          : h('p', { class: 'field-note' }, 'まだグループに参加していません。メニュー → グループ から作成・参加できます。')
-        : null,
-    );
-  }
-
   function renderAll() {
     renderMapField();
     renderPlacing();
@@ -1264,7 +1350,6 @@ function buildEditor(body, orig, defaults) {
     renderAbilities();
     renderSites();
     renderShots();
-    renderVisibility();
   }
 
   async function save() {
@@ -1279,14 +1364,13 @@ function buildEditor(body, orig, defaults) {
     ].filter(Boolean);
     if (problems.length) return toast(`${problems.join('・')}を入力してください`);
     if (f.videoUrl && !/^https:\/\//.test(f.videoUrl)) return toast('動画のリンクは https:// から始まるものにしてください');
-    if (f.visibility === 'group' && !groups.some((g) => g.id === f.groupId)) return toast('公開するグループを選んでください');
 
     saving = true;
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中…';
     try {
       const imageIds = [];
-      for (const s of slots) imageIds.push(!s ? null : s.id ?? (await store.putImage(s)));
+      for (const s of slots) imageIds.push(!s ? null : s.id ?? (await store.putImage(groupId, s)));
       const data = {
         map: f.map,
         side: f.side,
@@ -1301,16 +1385,26 @@ function buildEditor(body, orig, defaults) {
         importance: f.importance,
         videoUrl: f.videoUrl,
         imageIds,
-        visibility: f.visibility,
-        groupId: f.visibility === 'group' ? f.groupId : null,
       };
-      const savedId = await store.saveLineup(orig?.id ?? null, data);
+      const savedId = await store.saveLineup(groupId, orig?.id ?? null, data);
       // 外した画像を消す
       const removed = (orig?.imageIds ?? []).filter((x) => x && !imageIds.includes(x));
-      if (removed.length) await store.deleteImages(removed);
+      if (removed.length) await store.deleteImages(groupId, removed);
       toast(orig ? '保存しました' : '登録しました');
-      pendingOpen = { ...orig, ...data, id: savedId, ownerId: auth.currentUser().uid, ownerName: auth.displayName() };
-      location.replace(viewHash({ mapId: f.map, side: f.side, agentId: f.agent }));
+      const me = auth.currentUser().uid;
+      pendingOpen = {
+        groupId,
+        lineup: {
+          createdBy: me,
+          createdByName: auth.displayName(),
+          ...orig,
+          ...data,
+          id: savedId,
+          updatedBy: me,
+          updatedByName: auth.displayName(),
+        },
+      };
+      location.replace(viewHash(groupId, { mapId: f.map, side: f.side, agentId: f.agent }));
     } catch (e) {
       showError(e);
       saving = false;
@@ -1332,194 +1426,126 @@ function buildEditor(body, orig, defaults) {
   return () => document.removeEventListener('paste', onPaste);
 }
 
-// ---- 画面：グループ ----
+// ---- 画面：メンバー・招待（グループ設定） ----
 
-function groupsView(root) {
+function groupSettingsView(root, { groupId }) {
   const body = h('main', { class: 'content' });
-  root.append(header({ title: 'グループ', back: '#/' }), body);
+  const top = header({ title: 'メンバー・招待', back: lastViewHash(groupId) });
+  root.append(top, body);
+  const me = auth.currentUser().uid;
 
   function render() {
+    const g = groupById(groupId);
+    if (!g) return;
+    top.querySelector('.topbar-title').textContent = g.name;
+    const owner = g.members[me]?.role === 'owner';
+    const url = store.inviteUrl(g);
+    const members = Object.entries(g.members).sort((a, b) => (a[1].joinedAt ?? 0) - (b[1].joinedAt ?? 0));
     setChildren(
       body,
-      h('p', { class: 'section-label' }, '参加中のグループ'),
-      groups.length
-        ? h(
-            'div',
-            { class: 'card-list' },
-            groups.map((g) =>
-              h(
-                'a',
-                { class: 'card', href: `#/g/${g.id}` },
-                h('span', { class: 'card-icon' }, '👥'),
-                h('span', { class: 'card-main' }, h('span', { class: 'card-title' }, g.name), h('span', { class: 'card-sub' }, `${g.memberIds.length} 人`)),
-                h('span', { class: 'chevron' }, '›'),
-              ),
-            ),
-          )
-        : h('p', { class: 'empty' }, 'まだグループに参加していません。招待リンクを受け取ったら、そのリンクを開いてください。'),
-      isAdmin
-        ? h(
-            'button',
-            {
-              class: 'add-card',
-              onClick: async () => {
-                const name = await askText({ title: 'グループの名前', placeholder: '例：いつものフルパ', okLabel: '作成' });
-                if (!name) return;
-                try {
-                  const id = await store.createGroup(name);
-                  location.hash = `#/g/${id}`;
-                } catch (e) {
-                  showError(e);
-                }
-              },
-            },
-            '＋ グループを作成',
-          )
-        : h(
-            'div',
-            { class: 'notice' },
-            h('p', {}, 'グループを作れるのは、管理者が許可した Google アカウントだけです。作りたい場合は、次のユーザーIDを管理者に伝えてください。'),
-            h('code', { class: 'uid' }, auth.currentUser().uid),
+      h('p', { class: 'section-label' }, '招待'),
+      h(
+        'div',
+        { class: 'qr-card' },
+        qrCode(url, 120),
+        h(
+          'div',
+          { class: 'qr-card-text' },
+          h('strong', {}, '招待リンク'),
+          'このリンクを開くと、グループに参加できます（ゲストでも参加可）。',
+          h('button', { class: 'btn', onClick: () => share(`${g.name} に参加`, url, '招待リンクをコピーしました') }, 'リンクを共有'),
+        ),
+      ),
+      h('p', { class: 'section-label' }, `メンバー（${members.length}）`),
+      h(
+        'ul',
+        { class: 'member-list' },
+        members.map(([uid, m]) =>
+          h(
+            'li',
+            {},
+            h('span', { class: 'member-name' }, m.name, uid === me ? '（自分）' : ''),
+            m.role === 'owner' ? h('span', { class: 'badge' }, 'オーナー') : null,
+            m.guest ? h('span', { class: 'badge muted' }, 'ゲスト') : null,
           ),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'card-list group-actions' },
+        h(
+          'button',
+          {
+            class: 'btn',
+            onClick: async () => {
+              const name = await askText({ title: 'グループの名前', value: g.name, okLabel: '保存' });
+              if (name) store.renameGroup(groupId, name).catch(showError);
+            },
+          },
+          'グループの名前を変更',
+        ),
+        owner
+          ? h(
+              'button',
+              {
+                class: 'btn',
+                onClick: async () => {
+                  if (!(await confirmSheet('招待リンクを作り直すと、古いリンクでは参加できなくなります。', '作り直す'))) return;
+                  store.regenerateInvite(groupId).then(() => toast('招待リンクを作り直しました'), showError);
+                },
+              },
+              '招待リンクを作り直す',
+            )
+          : h(
+              'button',
+              {
+                class: 'btn danger',
+                onClick: async () => {
+                  if (!(await confirmSheet(`「${g.name}」から抜けますか？`, '抜ける'))) return;
+                  try {
+                    await store.leaveGroup(groupId);
+                    location.hash = '#/groups';
+                  } catch (e) {
+                    showError(e);
+                  }
+                },
+              },
+              'グループから抜ける',
+            ),
+        owner
+          ? h(
+              'button',
+              {
+                class: 'btn danger',
+                onClick: async () => {
+                  if (!(await confirmSheet(`「${g.name}」を削除しますか？ グループの定点もすべて消えます。`))) return;
+                  try {
+                    await store.deleteGroup(groupId);
+                    location.hash = '#/groups';
+                  } catch (e) {
+                    showError(e);
+                  }
+                },
+              },
+              'グループを削除',
+            )
+          : null,
+      ),
     );
   }
   render();
   return subscribe(render);
 }
 
-function groupView(root, { groupId }) {
-  const body = h('main', { class: 'content' });
-  const top = header({ title: 'グループ', back: '#/groups' });
-  root.append(top, body);
-  const me = auth.currentUser().uid;
-
-  const unwatch = store.watchGroup(
-    groupId,
-    (g) => {
-      top.querySelector('.topbar-title').textContent = g.name;
-      const owner = g.members[me]?.role === 'owner';
-      const url = store.inviteUrl(g);
-      const members = Object.entries(g.members).sort((a, b) => (a[1].joinedAt ?? 0) - (b[1].joinedAt ?? 0));
-      setChildren(
-        body,
-        h('p', { class: 'section-label' }, `メンバー（${members.length}）`),
-        h(
-          'ul',
-          { class: 'member-list' },
-          members.map(([uid, m]) =>
-            h(
-              'li',
-              {},
-              h('span', { class: 'member-name' }, m.name, uid === me ? '（自分）' : ''),
-              m.role === 'owner' ? h('span', { class: 'badge' }, 'オーナー') : null,
-              m.guest ? h('span', { class: 'badge muted' }, 'ゲスト') : null,
-            ),
-          ),
-        ),
-        h('p', { class: 'section-label' }, '招待'),
-        h(
-          'div',
-          { class: 'qr-card' },
-          qrCode(url, 120),
-          h(
-            'div',
-            { class: 'qr-card-text' },
-            h('strong', {}, '招待リンク'),
-            'このリンクを開くと、グループに参加できます。',
-            h(
-              'button',
-              {
-                class: 'btn',
-                onClick: async () => {
-                  if (navigator.share && matchMedia('(pointer: coarse)').matches) {
-                    await navigator.share({ title: `${g.name} に参加`, url }).catch(() => {});
-                  } else {
-                    await navigator.clipboard.writeText(url).catch(() => {});
-                    toast('招待リンクをコピーしました');
-                  }
-                },
-              },
-              'リンクを共有',
-            ),
-          ),
-        ),
-        h(
-          'div',
-          { class: 'card-list group-actions' },
-          h(
-            'button',
-            {
-              class: 'btn',
-              onClick: async () => {
-                const name = await askText({ title: 'グループの名前', value: g.name, okLabel: '保存' });
-                if (name) store.renameGroup(groupId, name).catch(showError);
-              },
-            },
-            '名前を変更',
-          ),
-          owner
-            ? h(
-                'button',
-                {
-                  class: 'btn',
-                  onClick: async () => {
-                    if (!(await confirmSheet('招待リンクを作り直すと、古いリンクでは参加できなくなります。', '作り直す'))) return;
-                    store.regenerateInvite(groupId).then(() => toast('招待リンクを作り直しました'), showError);
-                  },
-                },
-                '招待リンクを作り直す',
-              )
-            : h(
-                'button',
-                {
-                  class: 'btn danger',
-                  onClick: async () => {
-                    if (!(await confirmSheet(`「${g.name}」から抜けますか？`, '抜ける'))) return;
-                    try {
-                      await store.leaveGroup(groupId);
-                      location.hash = '#/groups';
-                    } catch (e) {
-                      showError(e);
-                    }
-                  },
-                },
-                'グループから抜ける',
-              ),
-          owner
-            ? h(
-                'button',
-                {
-                  class: 'btn danger',
-                  onClick: async () => {
-                    if (!(await confirmSheet(`「${g.name}」を削除しますか？（グループ公開の定点は、登録した本人だけが見られる状態になります）`))) return;
-                    try {
-                      await store.deleteGroup(groupId);
-                      location.hash = '#/groups';
-                    } catch (e) {
-                      showError(e);
-                    }
-                  },
-                },
-                'グループを削除',
-              )
-            : null,
-        ),
-      );
-    },
-    () => setChildren(body, h('p', { class: 'empty' }, 'このグループは見つからないか、メンバーではありません。')),
-  );
-  return unwatch;
-}
-
 // ---- ルーター（URL の # 以降で画面を切り替える） ----
 
-const routes = [
-  [/^#\/v\/([a-z0-9]+)\/(atk|def)(?:\/([a-z0-9]+))?$/, (m) => [mapView, { mapId: m[1], side: m[2], agentId: m[3] ?? null }]],
-  [/^#\/l\/([\w-]+)$/, (m) => [lineupLinkView, { id: m[1] }]],
-  [/^#\/new(?:\/([a-z0-9]+)\/(atk|def)(?:\/([a-z0-9]+))?)?$/, (m) => [editorView, { mapId: m[1], side: m[2], agentId: m[3] }]],
-  [/^#\/edit\/([\w-]+)$/, (m) => [editorView, { id: m[1] }]],
-  [/^#\/groups$/, () => [groupsView, {}]],
-  [/^#\/g\/([\w-]+)$/, (m) => [groupView, { groupId: m[1] }]],
+const G = '#\\/g\\/([\\w-]+)';
+const groupRoutes = [
+  [new RegExp(`^${G}\\/v\\/([a-z0-9]+)\\/(atk|def)(?:\\/([a-z0-9]+))?$`), (m) => [mapView, { mapId: m[2], side: m[3], agentId: m[4] ?? null }]],
+  [new RegExp(`^${G}\\/l\\/([\\w-]+)$`), (m) => [lineupLinkView, { id: m[2] }]],
+  [new RegExp(`^${G}\\/new(?:\\/([a-z0-9]+)\\/(atk|def)(?:\\/([a-z0-9]+))?)?$`), (m) => [editorView, { mapId: m[2], side: m[3], agentId: m[4] }]],
+  [new RegExp(`^${G}\\/edit\\/([\\w-]+)$`), (m) => [editorView, { id: m[2] }]],
+  [new RegExp(`^${G}\\/settings$`), () => [groupSettingsView, {}]],
 ];
 
 let unmount = null;
@@ -1539,15 +1565,33 @@ function route() {
   if (!user) return welcomeView(app);
   if (auth.needsName()) return nameSetupView(app);
 
-  for (const [re, make] of routes) {
+  if (hash === '#/groups') {
+    unmount = groupsView(app);
+    return;
+  }
+
+  for (const [re, make] of groupRoutes) {
     const m = hash.match(re);
     if (m) {
       const [view, params] = make(m);
-      unmount = view(app, params) ?? null;
+      const groupId = m[1];
+      unmount = withGroup(app, groupId, () => view(app, { groupId, ...params }));
       return;
     }
   }
-  location.replace(lastViewHash());
+
+  // #/g/{id} だけなら、そのグループで前回見ていたマップへ
+  const groupOnly = hash.match(new RegExp(`^${G}$`));
+  if (groupOnly) {
+    location.replace(lastViewHash(groupOnly[1]));
+    return;
+  }
+
+  // それ以外（#/ など）：前回のグループ、グループが 1 つだけならそこ、なければグループ一覧
+  if (!groupsLoaded) return loadingView(app);
+  const last = storageGet(LAST_GROUP_KEY);
+  const target = groupById(last)?.id ?? (groups.length === 1 ? groups[0].id : null);
+  location.replace(target ? lastViewHash(target) : '#/groups');
 }
 
 window.addEventListener('hashchange', route);
@@ -1560,32 +1604,31 @@ auth.watchUser((u) => {
   user = u;
   unwatchUserData.forEach((fn) => fn());
   unwatchUserData = [];
-  isAdmin = false;
   groups = [];
+  groupsLoaded = false;
   prefs = { favorites: [], shortcuts: [] };
   if (u) {
     unwatchUserData.push(
       store.watchMyGroups(
         (g) => {
+          const first = !groupsLoaded;
           groups = g;
+          groupsLoaded = true;
+          // 最初の読み込みを待っていた画面（#/ の振り分けなど）があれば出し直す
+          if (first && !authBusy && !location.hash.match(/^#\/(g|join)\//)) route();
+          else emit();
+        },
+        (e) => {
+          console.error(e);
+          groupsLoaded = true;
           emit();
         },
-        () => {},
       ),
       store.watchPrefs((p) => {
         prefs = p;
         emit();
       }),
     );
-    if (!u.isAnonymous) {
-      unwatchUserData.push(
-        store.watchIsAdmin(u.uid, (v) => {
-          if (v === isAdmin) return;
-          isAdmin = v;
-          emit();
-        }),
-      );
-    }
   }
   if (!authBusy) route();
 });

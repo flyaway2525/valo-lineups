@@ -1,12 +1,11 @@
 rules_version = '2';
 
 // valo-lineups のセキュリティルール
-// - 定点を読めるのは：作った本人 / 全体公開ならログインした人全員 / グループ公開ならそのグループのメンバー
-// - 定点を作る・直す・消すのは作った本人だけ
-// - グループを作れるのは admins/{uid} に登録された Google ログインユーザーだけ
+// - 定点・画像はグループの中にあり、そのグループのメンバーだけが読み書きできる（編集・削除もメンバー全員可）
+// - グループを作れるのは Google ログインの人（ゲストは不可）
 // - メンバー以外は、正しい招待コードを知っているときだけ自分をメンバーに追加できる
 //
-// 反映方法: Firebase コンソール → Firestore Database → ルール に貼り付けて「公開」
+// 反映方法: firebase deploy --only firestore:rules
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -19,24 +18,8 @@ service cloud.firestore {
       return request.auth.token.firebase.sign_in_provider == 'anonymous';
     }
 
-    function isAdmin() {
-      return signedIn() && !isGuestUser()
-        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-    }
-
     function isNonEmptyString(v, max) {
       return v is string && v.size() > 0 && v.size() <= max;
-    }
-
-    function isMemberOf(groupId) {
-      return groupId is string
-        && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
-    }
-
-    // ---- 許可リスト（コンソールからのみ編集） ----
-    match /admins/{userId} {
-      allow get: if signedIn() && request.auth.uid == userId;
-      allow list, write: if false;
     }
 
     // ---- グループ ----
@@ -48,6 +31,12 @@ service cloud.firestore {
 
       function isOwner() {
         return isMember() && resource.data.members[request.auth.uid].role == 'owner';
+      }
+
+      // 定点・画像（サブコレクション）用：グループのドキュメントを読んでメンバーか確かめる
+      function isGroupMember() {
+        return signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds;
       }
 
       function changed() {
@@ -108,72 +97,71 @@ service cloud.firestore {
       }
 
       allow get, list: if isMember();
-      allow create: if isAdmin() && isValidNewGroup();
+      allow create: if signedIn() && !isGuestUser() && isValidNewGroup();
       allow update: if (isMember() && changed().hasOnly(['name']) && isNonEmptyString(request.resource.data.name, 40))
         || (isOwner() && changed().hasOnly(['inviteCode']) && request.resource.data.inviteCode.size() >= 16)
         || (isMember() && isOwnProfileUpdate())
         || isValidLeave()
         || isValidJoin();
       allow delete: if isOwner();
-    }
 
-    // ---- 定点 ----
-    match /lineups/{lineupId} {
+      // ---- 定点 ----
+      match /lineups/{lineupId} {
 
-      function isPoint(p) {
-        return p is map && p.keys().hasOnly(['x', 'y'])
-          && p.x is number && p.x >= 0 && p.x <= 1
-          && p.y is number && p.y >= 0 && p.y <= 1;
+        function isPoint(p) {
+          return p is map && p.keys().hasOnly(['x', 'y'])
+            && p.x is number && p.x >= 0 && p.x <= 1
+            && p.y is number && p.y >= 0 && p.y <= 1;
+        }
+
+        function isValidLineup(d) {
+          return d.keys().hasOnly([
+              'map', 'side', 'agent', 'ability', 'site', 'from', 'to',
+              'title', 'notes', 'throwType', 'importance', 'videoUrl', 'imageIds',
+              'createdBy', 'createdByName', 'createdAt', 'updatedBy', 'updatedByName', 'updatedAt'])
+            && isNonEmptyString(d.map, 32)
+            && d.side in ['atk', 'def']
+            && isNonEmptyString(d.agent, 32)
+            && d.ability in ['Grenade', 'Ability1', 'Ability2', 'Ultimate']
+            && (d.site == null || d.site in ['A', 'B', 'C', 'mid'])
+            && isPoint(d.from) && isPoint(d.to)
+            && isNonEmptyString(d.title, 80)
+            && d.notes is string && d.notes.size() <= 2000
+            && d.throwType is string && d.throwType.size() <= 20
+            && d.importance in ['essential', 'useful', 'niche']
+            && d.videoUrl is string && d.videoUrl.size() <= 300
+            && (d.videoUrl == '' || d.videoUrl.matches('^https://.*'))
+            && d.imageIds is list && d.imageIds.size() <= 3
+            && d.createdByName is string && d.createdByName.size() <= 40
+            && d.updatedByName is string && d.updatedByName.size() <= 40
+            && d.updatedBy == request.auth.uid
+            && d.createdAt is number && d.updatedAt is number;
+        }
+
+        allow read: if isGroupMember();
+        allow create: if isGroupMember()
+          && isValidLineup(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        // メンバーなら誰でも編集できる。登録した人の情報は変えられない
+        allow update: if isGroupMember()
+          && isValidLineup(request.resource.data)
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isGroupMember();
       }
 
-      function isValidLineup(d) {
-        return d.keys().hasOnly([
-            'map', 'side', 'agent', 'ability', 'site', 'from', 'to',
-            'title', 'notes', 'throwType', 'importance', 'videoUrl', 'imageIds',
-            'visibility', 'groupId', 'ownerId', 'ownerName', 'createdAt', 'updatedAt', 'copiedFrom'])
-          && d.ownerId == request.auth.uid
-          && isNonEmptyString(d.map, 32)
-          && d.side in ['atk', 'def']
-          && isNonEmptyString(d.agent, 32)
-          && d.ability in ['Grenade', 'Ability1', 'Ability2', 'Ultimate']
-          && (d.site == null || d.site in ['A', 'B', 'C', 'mid'])
-          && isPoint(d.from) && isPoint(d.to)
-          && isNonEmptyString(d.title, 80)
-          && d.notes is string && d.notes.size() <= 2000
-          && d.throwType is string && d.throwType.size() <= 20
-          && d.importance in ['essential', 'useful', 'niche']
-          && d.videoUrl is string && d.videoUrl.size() <= 300
-          && (d.videoUrl == '' || d.videoUrl.matches('^https://.*'))
-          && d.imageIds is list && d.imageIds.size() <= 3
-          && d.ownerName is string && d.ownerName.size() <= 40
-          && d.createdAt is number && d.updatedAt is number
-          && (d.visibility == 'private' || d.visibility == 'public'
-            || (d.visibility == 'group' && isMemberOf(d.groupId)));
+      // ---- 画像 ----
+      match /images/{imageId} {
+        allow read: if isGroupMember();
+        allow update: if false;
+        allow create: if isGroupMember()
+          && request.resource.data.keys().hasOnly(['createdBy', 'data', 'w', 'h', 'createdAt'])
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 750000
+          && request.resource.data.data.matches('^data:image/(webp|jpeg|png);base64,.*');
+        allow delete: if isGroupMember();
       }
-
-      allow read: if signedIn() && (
-        resource.data.ownerId == request.auth.uid
-        || resource.data.visibility == 'public'
-        || (resource.data.visibility == 'group' && isMemberOf(resource.data.groupId)));
-      allow create: if signedIn() && isValidLineup(request.resource.data);
-      allow update: if signedIn() && resource.data.ownerId == request.auth.uid
-        && request.resource.data.createdAt == resource.data.createdAt
-        && isValidLineup(request.resource.data);
-      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
-    }
-
-    // ---- 画像 ----
-    // ID を知っていればログインした人は読める（ID は推測できないランダム値。一覧は取れない）
-    match /images/{imageId} {
-      allow get: if signedIn();
-      allow list, update: if false;
-      allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['ownerId', 'data', 'w', 'h', 'createdAt'])
-        && request.resource.data.ownerId == request.auth.uid
-        && request.resource.data.data is string
-        && request.resource.data.data.size() <= 750000
-        && request.resource.data.data.matches('^data:image/(webp|jpeg|png);base64,.*');
-      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
     }
 
     // ---- お気に入り・ショートカット（本人だけ） ----

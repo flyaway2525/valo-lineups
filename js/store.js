@@ -1,11 +1,10 @@
-// データの読み書きをまとめた層（Firestore 版）。同じ関数を demo.js も持っている。
+// データの読み書きをまとめた層（Firestore）。
 //
 // データ構造（詳しくは docs/design.md）
-//   admins/{uid}          グループを作れる人の許可リスト（コンソールから手で追加）
-//   groups/{groupId}      グループ。memberIds / members でメンバーを管理
-//   lineups/{lineupId}    定点。visibility = private（自分だけ）/ group（グループ）/ public（全体）
-//   images/{imageId}      定点の画像（圧縮した WebP を data URL で 1 枚 1 ドキュメント）
-//   prefs/{uid}           お気に入り・ショートカット（本人だけ読み書き）
+//   groups/{groupId}                     グループ。memberIds / members でメンバーを管理
+//   groups/{groupId}/lineups/{lineupId}  定点（グループのメンバー全員が見られて、編集もできる）
+//   groups/{groupId}/images/{imageId}    定点の画像（圧縮した WebP を data URL で 1 枚 1 ドキュメント）
+//   prefs/{uid}                          お気に入り・ショートカット（本人だけ読み書き）
 //
 // watch〜 は変更があるたびに cb を呼ぶ。戻り値の関数を呼ぶと監視をやめる。
 
@@ -29,9 +28,10 @@ import { db } from './firebase.js';
 import { currentUser, displayName, isGuest } from './auth.js';
 
 const groupRef = (groupId) => doc(db, 'groups', groupId);
-const lineupsCol = () => collection(db, 'lineups');
-const lineupRef = (id) => doc(db, 'lineups', id);
-const imageRef = (id) => doc(db, 'images', id);
+const lineupsCol = (groupId) => collection(db, 'groups', groupId, 'lineups');
+const lineupRef = (groupId, id) => doc(db, 'groups', groupId, 'lineups', id);
+const imagesCol = (groupId) => collection(db, 'groups', groupId, 'images');
+const imageRef = (groupId, id) => doc(db, 'groups', groupId, 'images', id);
 const prefsRef = () => doc(db, 'prefs', uid());
 
 function newId() {
@@ -57,14 +57,13 @@ function withId(snap) {
   return { id: snap.id, ...snap.data() };
 }
 
-// ---- 許可リスト ----
-
-export function watchIsAdmin(userId, cb) {
-  return onSnapshot(
-    doc(db, 'admins', userId),
-    (snap) => cb(snap.exists()),
-    () => cb(false),
-  );
+// 1 回のバッチは 500 件まで
+async function commitInChunks(ops) {
+  for (let i = 0; i < ops.length; i += 400) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + 400).forEach((op) => op(batch));
+    await batch.commit();
+  }
 }
 
 // ---- グループ ----
@@ -72,14 +71,6 @@ export function watchIsAdmin(userId, cb) {
 export function watchMyGroups(cb, onError) {
   const q = query(collection(db, 'groups'), where('memberIds', 'array-contains', uid()));
   return onSnapshot(q, (snap) => cb(snap.docs.map(withId).sort(byCreatedAt)), onError);
-}
-
-export function watchGroup(groupId, cb, onError) {
-  return onSnapshot(
-    groupRef(groupId),
-    (snap) => (snap.exists() ? cb(withId(snap)) : onError?.(new Error('not-found'))),
-    onError,
-  );
 }
 
 export async function createGroup(name) {
@@ -109,8 +100,10 @@ export function inviteUrl(group) {
   return `${location.origin}${location.pathname}#/join/${group.id}/${group.inviteCode}`;
 }
 
-// グループを消しても、グループ公開にしていた定点は消えない（登録した本人からは引き続き見える）
+// グループの定点・画像もまとめて消す（Firestore はサブコレクションを自動では消さない）
 export async function deleteGroup(groupId) {
+  const [lineups, images] = await Promise.all([getDocs(lineupsCol(groupId)), getDocs(imagesCol(groupId))]);
+  await commitInChunks([...lineups.docs, ...images.docs].map((d) => (b) => b.delete(d.ref)));
   await deleteDoc(groupRef(groupId));
 }
 
@@ -135,123 +128,98 @@ export async function leaveGroup(groupId) {
   await updateDoc(groupRef(groupId), { memberIds: arrayRemove(me), [`members.${me}`]: deleteField() });
 }
 
-// 名前を変えたとき・Google に引き継いだときに、グループでの表示と登録した定点の作者名をそろえる
+// 名前を変えたとき・Google に引き継いだときに、各グループでの表示をそろえる
 export async function syncMyProfile() {
   const me = uid();
-  const name = displayName();
-  const [groups, lineups] = await Promise.all([
-    getDocs(query(collection(db, 'groups'), where('memberIds', 'array-contains', me))),
-    getDocs(query(lineupsCol(), where('ownerId', '==', me))),
-  ]);
-  const writes = [
-    ...groups.docs.map((g) => [g.ref, { [`members.${me}.name`]: name, [`members.${me}.guest`]: isGuest() }]),
-    ...lineups.docs.filter((l) => l.data().ownerName !== name).map((l) => [l.ref, { ownerName: name }]),
-  ];
-  // 1 回のバッチは 500 件まで
-  for (let i = 0; i < writes.length; i += 400) {
-    const batch = writeBatch(db);
-    writes.slice(i, i + 400).forEach(([ref, data]) => batch.update(ref, data));
-    await batch.commit();
-  }
+  const groups = await getDocs(query(collection(db, 'groups'), where('memberIds', 'array-contains', me)));
+  await commitInChunks(
+    groups.docs.map((g) => (b) => b.update(g.ref, { [`members.${me}.name`]: displayName(), [`members.${me}.guest`]: isGuest() })),
+  );
 }
 
 // ---- 定点 ----
 
-// あるマップの「見てよい定点」をまとめて監視する
-//   自分の定点 + 所属グループに公開された定点 + 全体公開の定点
-// （セキュリティルールで検証できるよう、クエリを 3 種類に分けて手元で 1 つにまとめる）
-export function watchLineups(mapId, groupIds, cb, onError) {
-  const me = uid();
-  const parts = new Map(); // クエリごとの結果
-  const emit = () => {
-    const all = new Map();
-    for (const list of parts.values()) for (const l of list) all.set(l.id, l);
-    cb([...all.values()]);
-  };
-  const queries = [
-    ['mine', query(lineupsCol(), where('ownerId', '==', me), where('map', '==', mapId))],
-    ['public', query(lineupsCol(), where('visibility', '==', 'public'), where('map', '==', mapId))],
-    ...groupIds.map((g) => [
-      `g:${g}`,
-      query(lineupsCol(), where('visibility', '==', 'group'), where('groupId', '==', g), where('map', '==', mapId)),
-    ]),
-  ];
-  const unsubs = queries.map(([key, q]) =>
-    onSnapshot(
-      q,
-      (snap) => {
-        parts.set(key, snap.docs.map(withId));
-        emit();
-      },
-      onError,
-    ),
+// グループの、あるマップの定点を監視する
+export function watchLineups(groupId, mapId, cb, onError) {
+  return onSnapshot(
+    query(lineupsCol(groupId), where('map', '==', mapId)),
+    (snap) => cb(snap.docs.map(withId)),
+    onError,
   );
-  return () => unsubs.forEach((u) => u());
 }
 
-export async function getLineup(id) {
-  const snap = await getDoc(lineupRef(id));
+export async function getLineup(groupId, id) {
+  const snap = await getDoc(lineupRef(groupId, id));
   return snap.exists() ? withId(snap) : null;
 }
 
 // id が null なら新規作成。戻り値は定点の ID
-export async function saveLineup(id, data) {
+export async function saveLineup(groupId, id, data) {
   const me = uid();
   const now = Date.now();
+  const stamp = { updatedBy: me, updatedByName: displayName(), updatedAt: now };
   if (id) {
-    await updateDoc(lineupRef(id), { ...data, ownerName: displayName(), updatedAt: now });
+    await updateDoc(lineupRef(groupId, id), { ...data, ...stamp });
     return id;
   }
   const newLineupId = newId();
-  await setDoc(lineupRef(newLineupId), { ...data, ownerId: me, ownerName: displayName(), createdAt: now, updatedAt: now });
+  await setDoc(lineupRef(groupId, newLineupId), {
+    ...data,
+    ...stamp,
+    createdBy: me,
+    createdByName: displayName(),
+    createdAt: now,
+  });
   return newLineupId;
 }
 
 // imageIds は [立ち位置, 照準, 着弾] の 3 枠。空いている枠は null
-export async function deleteLineup(lineup) {
+export async function deleteLineup(groupId, lineup) {
   const batch = writeBatch(db);
-  (lineup.imageIds ?? []).filter(Boolean).forEach((imgId) => batch.delete(imageRef(imgId)));
-  batch.delete(lineupRef(lineup.id));
+  (lineup.imageIds ?? []).filter(Boolean).forEach((imgId) => batch.delete(imageRef(groupId, imgId)));
+  batch.delete(lineupRef(groupId, lineup.id));
   await batch.commit();
 }
 
-// 他の人の定点を自分の定点としてコピーする（画像も複製。元の定点とは同期しない）
-export async function copyLineup(lineup) {
+// 別のグループにコピーする（画像も複製。元の定点とは同期しない）
+export async function copyLineup(fromGroupId, lineup, toGroupId) {
   const imageIds = [];
   for (const imgId of lineup.imageIds ?? []) {
-    const img = imgId && (await getImage(imgId));
-    imageIds.push(img ? await putImage(img) : null);
+    const img = imgId && (await getImage(fromGroupId, imgId));
+    imageIds.push(img ? await putImage(toGroupId, img) : null);
   }
-  const { id, ownerId, ownerName, createdAt, updatedAt, copiedFrom, ...rest } = lineup;
-  return saveLineup(null, { ...rest, imageIds, visibility: 'private', groupId: null, copiedFrom: id });
+  const { id, createdBy, createdByName, createdAt, updatedBy, updatedByName, updatedAt, ...rest } = lineup;
+  return saveLineup(toGroupId, null, { ...rest, imageIds });
 }
 
 // ---- 画像 ----
 
 const imageCache = new Map();
 
-export async function putImage({ data, w, h }) {
+export async function putImage(groupId, { data, w, h }) {
   const id = newId();
-  await setDoc(imageRef(id), { ownerId: uid(), data, w, h, createdAt: Date.now() });
-  imageCache.set(id, { data, w, h });
+  await setDoc(imageRef(groupId, id), { createdBy: uid(), data, w, h, createdAt: Date.now() });
+  imageCache.set(`${groupId}/${id}`, { data, w, h });
   return id;
 }
 
-export async function getImage(id) {
-  if (imageCache.has(id)) return imageCache.get(id);
-  const snap = await getDoc(imageRef(id));
+export async function getImage(groupId, id) {
+  const key = `${groupId}/${id}`;
+  if (imageCache.has(key)) return imageCache.get(key);
+  const snap = await getDoc(imageRef(groupId, id));
   if (!snap.exists()) return null;
   const { data, w, h } = snap.data();
-  imageCache.set(id, { data, w, h });
+  imageCache.set(key, { data, w, h });
   return { data, w, h };
 }
 
-export async function deleteImages(ids) {
-  await Promise.all(ids.map((id) => deleteDoc(imageRef(id)).catch(() => {})));
-  ids.forEach((id) => imageCache.delete(id));
+export async function deleteImages(groupId, ids) {
+  await Promise.all(ids.map((id) => deleteDoc(imageRef(groupId, id)).catch(() => {})));
+  ids.forEach((id) => imageCache.delete(`${groupId}/${id}`));
 }
 
 // ---- お気に入り・ショートカット ----
+// お気に入りは "groupId/lineupId" の形で持つ
 
 export function watchPrefs(cb) {
   return onSnapshot(
@@ -261,8 +229,8 @@ export function watchPrefs(cb) {
   );
 }
 
-export async function setFavorite(lineupId, on) {
-  await setDoc(prefsRef(), { favorites: on ? arrayUnion(lineupId) : arrayRemove(lineupId) }, { merge: true });
+export async function setFavorite(key, on) {
+  await setDoc(prefsRef(), { favorites: on ? arrayUnion(key) : arrayRemove(key) }, { merge: true });
 }
 
 export async function setShortcuts(shortcuts) {
