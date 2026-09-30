@@ -1,7 +1,7 @@
 import * as auth from './auth.js';
 import * as store from './store.js';
 import * as valo from './valo.js';
-import { h, setChildren, header, actionSheet, confirmSheet, askText, openSheet, toast, qrCode, userIcon } from './ui.js';
+import { h, setChildren, header, actionSheet, confirmSheet, askText, openSheet, toast, qrCode, userIcon, gearIcon } from './ui.js';
 import { createMapView } from './mapview.js';
 import { compressImage, imageFromTransfer } from './images.js';
 
@@ -351,16 +351,21 @@ function groupsView(root) {
             { class: 'card-list' },
             groups.map((g) =>
               h(
-                'a',
-                { class: `card${g.id === last ? ' current' : ''}`, href: `#/g/${g.id}` },
-                h('span', { class: 'card-icon' }, g.name.slice(0, 1)),
+                'div',
+                { class: `group-row${g.id === last ? ' current' : ''}` },
                 h(
-                  'span',
-                  { class: 'card-main' },
-                  h('span', { class: 'card-title' }, g.name),
-                  h('span', { class: 'card-sub' }, `${g.memberIds.length} 人${g.members[auth.currentUser().uid]?.role === 'owner' ? ' ・ オーナー' : ''}`),
+                  'a',
+                  { class: 'group-open', href: `#/g/${g.id}` },
+                  h('span', { class: 'card-icon' }, g.name.slice(0, 1)),
+                  h(
+                    'span',
+                    { class: 'card-main' },
+                    h('span', { class: 'card-title' }, g.name),
+                    h('span', { class: 'card-sub' }, `${g.memberIds.length} 人${g.members[auth.currentUser().uid]?.role === 'owner' ? ' ・ オーナー' : ''}`),
+                  ),
                 ),
-                h('span', { class: 'chevron' }, '›'),
+                // グループの設定（名前・メンバー・招待）
+                h('a', { class: 'group-settings', href: `#/g/${g.id}/settings`, 'aria-label': `${g.name} の設定`, title: 'グループの設定' }, gearIcon()),
               ),
             ),
           )
@@ -440,15 +445,6 @@ function clusterByTarget(lineups) {
   return clusters;
 }
 
-// グループ名を押したときのメニュー（ユーザーの操作は右上の人アイコンへ分けた）
-function groupMenu(groupId) {
-  const g = groupById(groupId);
-  actionSheet(g?.name ?? 'グループ', [
-    { label: 'メンバー・招待', onClick: () => (location.hash = `#/g/${groupId}/settings`) },
-    { label: 'グループを切り替え', onClick: () => (location.hash = '#/groups') },
-  ]);
-}
-
 function mapView(root, { groupId, mapId, side, agentId }) {
   const map = valo.mapById(mapId);
   if (!map) {
@@ -485,12 +481,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
 
   // ---- 上部 ----
   const groupName = h('span', {});
-  const groupLabel = h(
-    'button',
-    { class: 'group-label', onClick: () => groupMenu(groupId), title: 'メンバー・招待・グループの切り替え' },
-    groupName,
-    h('span', { class: 'caret' }, '▾'),
-  );
+  const groupLabel = h('span', { class: 'group-label' }, groupName);
   const topbar = h(
     'header',
     { class: 'topbar map-topbar' },
@@ -1543,19 +1534,36 @@ function buildEditor(body, groupId, orig, defaults) {
 
 function groupSettingsView(root, { groupId }) {
   const body = h('main', { class: 'content' });
-  const top = header({ title: 'メンバー・招待', back: lastViewHash(groupId) });
+  const top = header({ title: 'グループの設定', back: '#/groups' });
   root.append(top, body);
   const me = auth.currentUser().uid;
 
   function render() {
     const g = groupById(groupId);
     if (!g) return;
-    top.querySelector('.topbar-title').textContent = g.name;
     const owner = g.members[me]?.role === 'owner';
     const url = store.inviteUrl(g);
     const members = Object.entries(g.members).sort((a, b) => (a[1].joinedAt ?? 0) - (b[1].joinedAt ?? 0));
     setChildren(
       body,
+      h('p', { class: 'section-label' }, 'グループ名'),
+      h(
+        'div',
+        { class: 'name-row' },
+        h('strong', { class: 'name-row-text' }, g.name),
+        h(
+          'button',
+          {
+            class: 'btn',
+            onClick: async () => {
+              const name = await askText({ title: 'グループの名前', value: g.name, okLabel: '保存' });
+              if (name) store.renameGroup(groupId, name).then(() => toast('名前を変更しました'), showError);
+            },
+          },
+          '変更',
+        ),
+      ),
+      h('a', { class: 'btn wide-link open-group', href: `#/g/${groupId}` }, 'このグループの定点を開く ›'),
       h('p', { class: 'section-label' }, '招待'),
       h(
         'div',
@@ -1586,17 +1594,6 @@ function groupSettingsView(root, { groupId }) {
       h(
         'div',
         { class: 'card-list group-actions' },
-        h(
-          'button',
-          {
-            class: 'btn',
-            onClick: async () => {
-              const name = await askText({ title: 'グループの名前', value: g.name, okLabel: '保存' });
-              if (name) store.renameGroup(groupId, name).catch(showError);
-            },
-          },
-          'グループの名前を変更',
-        ),
         owner
           ? h(
               'button',

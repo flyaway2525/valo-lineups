@@ -618,8 +618,67 @@ a {
   color: var(--from);
 }
 
-.card.current {
+/* グループ一覧の 1 行：左（開く）と右の歯車（設定）に分ける */
+.group-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 64px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.group-row.current {
   border-color: var(--from);
+}
+
+.group-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.group-open:active,
+.group-settings:active {
+  background: var(--surface-2);
+}
+
+.group-settings {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+}
+
+/* グループの設定：名前の行 */
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.name-row-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open-group {
+  margin-top: 10px;
+  color: var(--from);
 }
 
 .card-icon {
