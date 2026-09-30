@@ -482,8 +482,8 @@ a {
 }
 
 .map-topbar .back {
-  width: 32px;
-  margin-right: -4px;
+  width: 36px;
+  font-size: 32px;
 }
 
 /* 今いるグループ名（小さく）＋ マップ名 */
@@ -864,6 +864,10 @@ a {
   stroke-width: 2.5;
 }
 
+.map-line.dim {
+  opacity: 0.2;
+}
+
 .map-markers,
 .map-callouts {
   position: absolute;
@@ -942,6 +946,34 @@ a {
 
 .marker.from img {
   border-radius: 50%;
+}
+
+/* 選んでいない立ち位置は少し小さく、着弾点より下に */
+.marker.from:not(.selected) {
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+}
+
+.marker.from.selected {
+  box-shadow: 0 0 0 4px rgb(62 230 196 / 0.35), 0 1px 4px rgb(0 0 0 / 0.5);
+}
+
+.marker.dim {
+  opacity: 0.3;
+}
+
+/* 重なり順：選んだ着弾点 > 選んだ立ち位置 > 着弾点 > 立ち位置 */
+.marker.target {
+  z-index: 2;
+}
+
+.marker.from.selected {
+  z-index: 3;
+}
+
+.marker.target.selected {
+  z-index: 4;
 }
 
 .marker-badge {

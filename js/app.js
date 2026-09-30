@@ -665,21 +665,24 @@ function mapView(root, { groupId, mapId, side, agentId }) {
         },
       };
     });
+    // 立ち位置と軌道線は常にすべて出す。着弾点を選んでいるときは、それ以外を薄くする
     const lines = [];
-    if (selected) {
-      for (const l of selected.items) {
-        lines.push({ from: l.from, to: l.to, kind: 'selected' });
-        markers.push({
+    const fromMarkers = [];
+    for (const c of clusters) {
+      const state = !selected ? '' : selected === c ? ' selected' : ' dim';
+      for (const l of c.items) {
+        lines.push({ from: l.from, to: l.to, kind: state.trim() });
+        fromMarkers.push({
           x: l.from.x,
           y: l.from.y,
           icon: valo.agentById(l.agent)?.icon,
-          kind: 'from',
+          kind: `from${state}`,
           label: `${l.title}（立ち位置）`,
           onClick: () => openDetail(groupId, l),
         });
       }
     }
-    mv.render({ markers, lines });
+    mv.render({ markers: [...fromMarkers, ...markers], lines });
   }
 
   function lineupCard(l) {
@@ -715,7 +718,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
           { class: 'list-hint' },
           list.length
             ? agentId
-              ? `${list.length} 件。地図のアイコンをタップすると立ち位置と詳細が出ます。`
+              ? `${list.length} 件。着弾点（赤）をタップすると絞り込み、立ち位置（顔）をタップすると詳細が出ます。`
               : `${list.length} 件。エージェントを選ぶか、地図のアイコンをタップしてください。`
             : agentId
               ? 'この条件の定点はまだありません。右上の ＋ から登録できます。'
