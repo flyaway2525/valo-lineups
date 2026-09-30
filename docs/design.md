@@ -146,15 +146,19 @@ prefs/{uid}                 { favorites: [lineupId], shortcuts: [{ mapId, side, 
 
 ## 初期設定（Firebase）
 
-1. [Firebase コンソール](https://console.firebase.google.com/) で新しいプロジェクトを作る（ouchi-share とは別）
-2. Authentication →「始める」→ ログイン方法で **Google** と **匿名** を有効にする
-3. Firestore Database →「データベースを作成」（本番環境モード、ロケーションは `asia-northeast1` など）
-4. `firestore.rules` の内容を Firestore Database → ルール に貼り付けて「公開」
-5. プロジェクトの設定 → マイアプリ →「ウェブアプリを追加」→ 表示された設定値を `js/config.js` に貼り付ける
-6. Authentication → 設定 → 承認済みドメイン に GitHub Pages のドメイン（`<ユーザー名>.github.io`）を追加
-7. 管理者の登録：アプリで Google ログイン → メニュー →「ユーザーIDをコピー」
+Firebase プロジェクト：`valo-lineups-fly`（`valo-lineups` は他の人が使用済みだった）。
+Firebase CLI（`npm install -g firebase-tools` → `firebase login`）で作成した。
+
+1. `firebase projects:create valo-lineups-fly` でプロジェクトを作る（ouchi-share とは別）
+2. `firebase apps:create web` → `firebase apps:sdkconfig` の値を `js/config.js` に入れる
+3. `firebase deploy --only firestore:rules`
+   - Firestore API の有効化と、データベース（`asia-northeast1`）の作成も自動で行われる
+   - ルールを直したときも、このコマンドで反映する（`firebase.json` / `.firebaserc` に設定済み）
+4. **コンソールで**：Authentication →「始める」→ ログイン方法で **Google** と **匿名** を有効にする
+5. **コンソールで**：Authentication → 設定 → 承認済みドメイン に `flyaway2525.github.io` を追加
+6. 管理者の登録：アプリで Google ログイン → メニュー →「ユーザーIDをコピー」
    → Firestore → データ →「コレクションを開始」→ ID `admins`、ドキュメント ID にユーザーID、フィールド `note`（string）に名前など
-8. メニュー → グループ →「＋ グループを作成」→ 招待リンクを仲間に送る
+7. メニュー → グループ →「＋ グループを作成」→ 招待リンクを仲間に送る
 
 ## 今後の候補
 
