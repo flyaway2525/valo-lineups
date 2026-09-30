@@ -1,7 +1,7 @@
 import * as auth from './auth.js';
 import * as store from './store.js';
 import * as valo from './valo.js';
-import { h, setChildren, header, actionSheet, confirmSheet, askText, openSheet, toast, qrCode } from './ui.js';
+import { h, setChildren, header, actionSheet, confirmSheet, askText, openSheet, toast, qrCode, userIcon } from './ui.js';
 import { createMapView } from './mapview.js';
 import { compressImage, imageFromTransfer } from './images.js';
 
@@ -163,8 +163,18 @@ function accountActions() {
   ].filter(Boolean);
 }
 
+// ログイン方法の表示：Google ならメールアドレス、ゲストなら「ゲスト」
+function loginMethod() {
+  return auth.isGuest() ? 'ゲスト' : `Google：${auth.currentUser()?.email ?? ''}`;
+}
+
 function accountMenu() {
-  actionSheet(`${auth.displayName()}${auth.isGuest() ? '（ゲスト）' : ''}`, accountActions());
+  actionSheet(`${auth.displayName()} としてログイン中（${loginMethod()}）`, accountActions());
+}
+
+// 右上のユーザー設定ボタン（人のアイコン）
+function accountButton() {
+  return h('button', { class: 'topbar-btn account-btn', onClick: accountMenu, 'aria-label': 'ユーザー設定', title: 'ユーザー設定' }, userIcon());
 }
 
 // ---- 画面：読み込み中・エラー ----
@@ -315,13 +325,25 @@ function joinView(root, { groupId, code }) {
 
 function groupsView(root) {
   const body = h('main', { class: 'content' });
-  root.append(header({ title: 'valo-lineups', onMenu: accountMenu }), body);
+  root.append(header({ title: 'valo-lineups', right: accountButton() }), body);
   const last = storageGet(LAST_GROUP_KEY);
 
   function render() {
     if (!groupsLoaded) return setChildren(body, h('div', { class: 'spinner' }));
     setChildren(
       body,
+      h(
+        'button',
+        { class: 'account-bar', onClick: accountMenu },
+        h('span', { class: 'account-bar-icon' }, userIcon()),
+        h(
+          'span',
+          { class: 'account-bar-main' },
+          h('span', { class: 'account-bar-name' }, h('strong', {}, auth.displayName()), ' としてログイン中'),
+          h('span', { class: 'account-bar-sub' }, loginMethod()),
+        ),
+        h('span', { class: 'chevron' }, '›'),
+      ),
       h('p', { class: 'section-label' }, 'グループを選んでください'),
       groups.length
         ? h(
@@ -418,12 +440,12 @@ function clusterByTarget(lineups) {
   return clusters;
 }
 
+// グループ名を押したときのメニュー（ユーザーの操作は右上の人アイコンへ分けた）
 function groupMenu(groupId) {
   const g = groupById(groupId);
-  actionSheet(`${g?.name ?? 'グループ'} ・ ${auth.displayName()}${auth.isGuest() ? '（ゲスト）' : ''}`, [
+  actionSheet(g?.name ?? 'グループ', [
     { label: 'メンバー・招待', onClick: () => (location.hash = `#/g/${groupId}/settings`) },
     { label: 'グループを切り替え', onClick: () => (location.hash = '#/groups') },
-    ...accountActions(),
   ]);
 }
 
@@ -462,7 +484,13 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   }
 
   // ---- 上部 ----
-  const groupLabel = h('span', { class: 'group-label' });
+  const groupName = h('span', {});
+  const groupLabel = h(
+    'button',
+    { class: 'group-label', onClick: () => groupMenu(groupId), title: 'メンバー・招待・グループの切り替え' },
+    groupName,
+    h('span', { class: 'caret' }, '▾'),
+  );
   const topbar = h(
     'header',
     { class: 'topbar map-topbar' },
@@ -490,7 +518,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
       { class: 'topbar-btn add-btn', href: `#/g/${groupId}/new/${mapId}/${side}${agentId ? `/${agentId}` : ''}`, 'aria-label': '定点を登録', title: '定点を登録' },
       '＋',
     ),
-    h('button', { class: 'topbar-btn', onClick: () => groupMenu(groupId), 'aria-label': 'メニュー' }, '⋯'),
+    accountButton(),
   );
 
   // ---- 地図 ----
@@ -508,7 +536,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   root.append(h('div', { class: 'map-screen' }, topbar, h('div', { class: 'map-wrap' }, mv.el), panel));
 
   function renderHeader() {
-    groupLabel.textContent = groupById(groupId)?.name ?? '';
+    groupName.textContent = groupById(groupId)?.name ?? '';
   }
 
   function renderShortcuts() {

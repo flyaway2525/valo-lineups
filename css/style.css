@@ -482,8 +482,29 @@ a {
 }
 
 .map-topbar .back {
-  width: 36px;
+  width: 28px;
   font-size: 32px;
+}
+
+/* スマホでマップ名が切れないよう、右側のボタンを詰める */
+@media (max-width: 480px) {
+  .map-topbar {
+    gap: 2px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .map-topbar .topbar-btn:not(.back) {
+    width: 38px;
+  }
+
+  .map-topbar .segmented button {
+    padding: 6px 9px;
+  }
+
+  .map-topbar .map-picker {
+    font-size: 17px;
+  }
 }
 
 /* 今いるグループ名（小さく）＋ マップ名 */
@@ -495,11 +516,78 @@ a {
   line-height: 1.2;
 }
 
+/* グループ名（押すとメンバー・招待・切り替え） */
 .group-label {
-  overflow: hidden;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
   font-size: 11px;
   font-weight: 700;
   color: var(--from);
+}
+
+.group-label > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-label .caret {
+  color: var(--from);
+  font-size: 10px;
+}
+
+.account-btn {
+  color: var(--text);
+}
+
+/* グループ一覧の「○○ としてログイン中」 */
+.account-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: left;
+}
+
+.account-bar-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--from);
+}
+
+.account-bar-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.account-bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-bar-sub {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

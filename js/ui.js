@@ -24,7 +24,8 @@ export function setChildren(el, ...children) {
   el.replaceChildren(...children.flat(Infinity).filter((c) => c != null && c !== false));
 }
 
-export function header({ title, back, onMenu }) {
+// right：右上に置くボタン（なければ onMenu の「⋯」）
+export function header({ title, back, onMenu, right }) {
   return h(
     'header',
     { class: 'topbar' },
@@ -32,10 +33,20 @@ export function header({ title, back, onMenu }) {
       ? h('a', { class: 'topbar-btn', href: back, 'aria-label': '戻る' }, '‹')
       : h('span', { class: 'topbar-btn' }),
     h('h1', { class: 'topbar-title' }, title),
-    onMenu
-      ? h('button', { class: 'topbar-btn', onClick: onMenu, 'aria-label': 'メニュー' }, '⋯')
-      : h('span', { class: 'topbar-btn' }),
+    right ??
+      (onMenu
+        ? h('button', { class: 'topbar-btn', onClick: onMenu, 'aria-label': 'メニュー' }, '⋯')
+        : h('span', { class: 'topbar-btn' })),
   );
+}
+
+// 人のアイコン（固定の SVG。ユーザー入力は含まない）
+export function userIcon() {
+  const svg = new DOMParser().parseFromString(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
+    'image/svg+xml',
+  ).documentElement;
+  return document.importNode(svg, true);
 }
 
 export function progressBar(done, total) {
