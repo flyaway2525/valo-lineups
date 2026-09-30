@@ -3,7 +3,7 @@
 // （開発中に古いファイルが表示され続けるのを避けるため）。
 // マップ・エージェントの画像は中身が変わらないので、キャッシュ優先にして 2 回目以降すぐ出す。
 
-const CACHE = 'valo-lineups-v2';
+const CACHE = 'valo-lineups-v3';
 const ASSETS = 'valo-lineups-assets-v1';
 const SHELL = [
   './',
@@ -64,8 +64,10 @@ self.addEventListener('fetch', (e) => {
   // マップ・エージェント・アビリティの画像
   if (url.hostname === 'media.valorant-api.com') return e.respondWith(cacheFirst(e.request, ASSETS));
   if (url.origin !== location.origin) return;
+  // GitHub Pages はブラウザに 10 分キャッシュさせるので、毎回サーバーに更新を確かめる
+  // （変わっていなければ中身は送られてこないので軽い）
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
