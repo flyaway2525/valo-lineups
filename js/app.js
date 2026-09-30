@@ -439,7 +439,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   let lineups = [];
   let source = sessionStorage.getItem('source') ?? 'all';
   if (!SOURCES.some((s) => s.id === source)) source = 'all';
-  let onlySlot = null; // 選んだアビリティだけ表示（null = 全部）
+  const shownSlots = new Set(); // 選んだアビリティだけ表示（空 = 全部）
   let selected = null; // 選んでいる着弾点のクラスター
   let pendingSelect = null; // 次の描画で選ぶ着弾点
   let mode = sessionStorage.getItem('mode') ?? 'map';
@@ -454,7 +454,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
       (l) =>
         l.side === side &&
         (!agentId || l.agent === agentId) &&
-        (!onlySlot || l.ability === onlySlot) &&
+        (!shownSlots.size || shownSlots.has(l.ability)) &&
         (source === 'all' ||
           (source === 'mine' && l.createdBy === me) ||
           (source === 'fav' && prefs.favorites.includes(favKey(groupId, l.id)))),
@@ -567,9 +567,11 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     );
   }
 
-  // タップしたアビリティだけにする。もう一度タップすると全部に戻す
+  // 押したアビリティを表示に加える / 外す。
+  // 最後の 1 つを外したとき、全部そろったときは、最初の状態（全部表示）に戻す
   function toggleSlot(slot) {
-    onlySlot = onlySlot === slot ? null : slot;
+    shownSlots.has(slot) ? shownSlots.delete(slot) : shownSlots.add(slot);
+    if (shownSlots.size === valo.agentById(agentId)?.abilities.length) shownSlots.clear();
     selected = null;
     render();
   }
@@ -586,8 +588,8 @@ function mapView(root, { groupId, mapId, side, agentId }) {
         h(
           'button',
           {
-            class: `ability-btn${onlySlot === ab.slot ? ' active' : onlySlot ? ' off' : ''}`,
-            'aria-pressed': onlySlot === ab.slot,
+            class: `ability-btn${shownSlots.has(ab.slot) ? ' active' : shownSlots.size ? ' off' : ''}`,
+            'aria-pressed': shownSlots.has(ab.slot),
             title: ab.name,
             onClick: () => toggleSlot(ab.slot),
           },
