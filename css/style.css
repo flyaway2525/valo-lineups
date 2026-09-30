@@ -57,20 +57,6 @@ a {
   display: none !important;
 }
 
-.demo-banner {
-  padding: calc(var(--safe-top) + 4px) 12px 4px;
-  background: var(--gold);
-  color: #1a1a1a;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
-}
-
-.has-demo .topbar,
-.demo-banner + .topbar {
-  padding-top: 8px;
-}
-
 /* ---- ヘッダー ---- */
 
 .topbar {
@@ -495,19 +481,62 @@ a {
   gap: 8px;
 }
 
-.map-picker {
+.map-topbar .back {
+  width: 32px;
+  margin-right: -4px;
+}
+
+/* 今いるグループ名（小さく）＋ マップ名 */
+.map-title {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.group-label {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--from);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-picker {
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 8px;
+  padding: 0;
   border: 0;
   background: none;
   font-size: 19px;
   font-weight: 800;
   letter-spacing: 0.02em;
   text-align: left;
+}
+
+.editor-group {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 10px 16px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.editor-group strong {
+  color: var(--from);
+}
+
+.card.current {
+  border-color: var(--from);
+}
+
+.card-icon {
+  font-weight: 800;
+  color: var(--accent);
 }
 
 .map-picker-name {
@@ -755,16 +784,11 @@ a {
   .map-screen {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 400px;
-    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .map-screen > .demo-banner,
   .map-screen > .topbar {
     grid-column: 1 / -1;
-  }
-
-  .map-screen:not(.has-demo) {
-    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .map-wrap {
