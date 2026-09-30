@@ -1415,9 +1415,12 @@ a {
 }
 
 .shot-empty {
-  padding-top: 14px;
+  padding: 14px 4px 0;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--muted);
+  text-align: center;
+  white-space: pre-line;
 }
 
 .shot-remove {

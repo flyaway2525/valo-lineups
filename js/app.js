@@ -1062,8 +1062,9 @@ function buildEditor(body, groupId, orig, defaults) {
     importance: orig?.importance ?? 'useful',
     videoUrl: orig?.videoUrl ?? '',
   };
+  const touch = matchMedia('(pointer: coarse)').matches; // スマホ・タブレット
   // 画像の 3 枠：{ id } = 保存済み、{ data, w, h } = 新しく追加、null = 空
-  const slots = [0, 1, 2].map((i) => (orig?.imageIds?.[i] ? { id: orig.imageIds[i] } : null));
+  const slots =[0, 1, 2].map((i) => (orig?.imageIds?.[i] ? { id: orig.imageIds[i] } : null));
   let activeSlot = slots.findIndex((s) => !s);
   let placing = f.from ? (f.to ? null : 'to') : 'from';
   let titleTouched = !!orig;
@@ -1136,7 +1137,11 @@ function buildEditor(body, groupId, orig, defaults) {
           '重要度',
           selectEl(valo.IMPORTANCE, f.importance, (v) => (f.importance = v)),
         ),
-        field('画像（Ctrl+V で貼り付け・ドロップ・タップで選択）', shotsBox, fileInput),
+        field(
+          touch ? '画像（タップで選択）' : '画像（クリックで枠を選んで Ctrl+V・ドロップ・ダブルクリックでファイル選択）',
+          shotsBox,
+          fileInput,
+        ),
         field('メモ', notesInput),
         field('動画', videoInput),
         saveBtn,
@@ -1269,6 +1274,22 @@ function buildEditor(body, groupId, orig, defaults) {
     );
   }
 
+  // 空いている枠の案内（選んでいる枠だけ貼り付けの案内を出す）
+  function emptyHint(i) {
+    if (i !== activeSlot) return '＋';
+    return touch ? 'タップで選択' : 'Ctrl+V で貼り付け\nダブルクリックで選択';
+  }
+
+  // 枠を選ぶ。作り直すとダブルクリックが効かなくなるので、表示だけ切り替える
+  function selectSlot(i) {
+    activeSlot = i;
+    [...shotsBox.children].forEach((box, j) => {
+      box.classList.toggle('active', j === i);
+      const empty = box.querySelector('.shot-empty');
+      if (empty) empty.textContent = emptyHint(j);
+    });
+  }
+
   function renderShots() {
     setChildren(
       shotsBox,
@@ -1279,10 +1300,16 @@ function buildEditor(body, groupId, orig, defaults) {
           {
             class: `shot-slot${i === activeSlot ? ' active' : ''}${slot ? ' filled' : ''}`,
             tabindex: 0,
+            // PC：クリックで枠を選ぶ（そのあと Ctrl+V）、ダブルクリックでファイル選択
+            // スマホ：ダブルタップしにくく貼り付けも使わないので、タップでファイル選択
             onClick: () => {
-              activeSlot = i;
-              renderShots();
-              if (!slot) fileInput.click();
+              selectSlot(i);
+              if (touch && !slot) fileInput.click();
+            },
+            onDblclick: () => {
+              if (touch) return;
+              selectSlot(i);
+              fileInput.click();
             },
             onDragover: (e) => {
               e.preventDefault();
@@ -1321,7 +1348,7 @@ function buildEditor(body, groupId, orig, defaults) {
             ),
           );
         } else {
-          box.append(h('span', { class: 'shot-empty' }, i === activeSlot ? 'ここに貼り付け' : '＋'));
+          box.append(h('span', { class: 'shot-empty' }, emptyHint(i)));
         }
         return box;
       }),
