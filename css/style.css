@@ -669,6 +669,11 @@ a {
   opacity: 0.35;
 }
 
+.ability-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .ability-key {
   font-weight: 800;
 }

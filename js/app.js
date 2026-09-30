@@ -439,7 +439,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   let lineups = [];
   let source = sessionStorage.getItem('source') ?? 'all';
   if (!SOURCES.some((s) => s.id === source)) source = 'all';
-  const hiddenSlots = new Set();
+  let onlySlot = null; // 選んだアビリティだけ表示（null = 全部）
   let selected = null; // 選んでいる着弾点のクラスター
   let pendingSelect = null; // 次の描画で選ぶ着弾点
   let mode = sessionStorage.getItem('mode') ?? 'map';
@@ -454,7 +454,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
       (l) =>
         l.side === side &&
         (!agentId || l.agent === agentId) &&
-        !hiddenSlots.has(l.ability) &&
+        (!onlySlot || l.ability === onlySlot) &&
         (source === 'all' ||
           (source === 'mine' && l.createdBy === me) ||
           (source === 'fav' && prefs.favorites.includes(favKey(groupId, l.id)))),
@@ -567,6 +567,13 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     );
   }
 
+  // タップしたアビリティだけにする。もう一度タップすると全部に戻す
+  function toggleSlot(slot) {
+    onlySlot = onlySlot === slot ? null : slot;
+    selected = null;
+    render();
+  }
+
   function renderAbilities() {
     const agent = valo.agentById(agentId);
     abilityRow.hidden = !agent;
@@ -579,14 +586,10 @@ function mapView(root, { groupId, mapId, side, agentId }) {
         h(
           'button',
           {
-            class: `ability-btn${hiddenSlots.has(ab.slot) ? ' off' : ''}`,
-            'aria-pressed': !hiddenSlots.has(ab.slot),
+            class: `ability-btn${onlySlot === ab.slot ? ' active' : onlySlot ? ' off' : ''}`,
+            'aria-pressed': onlySlot === ab.slot,
             title: ab.name,
-            onClick: () => {
-              hiddenSlots.has(ab.slot) ? hiddenSlots.delete(ab.slot) : hiddenSlots.add(ab.slot);
-              selected = null;
-              render();
-            },
+            onClick: () => toggleSlot(ab.slot),
           },
           h('img', { src: ab.icon, alt: '', draggable: 'false' }),
           h('span', { class: 'ability-key' }, ab.key),
@@ -798,9 +801,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     const agent = valo.agentById(agentId);
     const n = parseInt(e.key, 10);
     if (agent && n >= 1 && n <= agent.abilities.length) {
-      const slot = agent.abilities[n - 1].slot;
-      hiddenSlots.has(slot) ? hiddenSlots.delete(slot) : hiddenSlots.add(slot);
-      render();
+      toggleSlot(agent.abilities[n - 1].slot);
     } else if (e.key === 'm' || e.key === 'M') {
       mode = mode === 'map' ? 'list' : 'map';
       render();
