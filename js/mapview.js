@@ -123,7 +123,7 @@ export function createMapView({ onPick } = {}) {
       setTimeout(() => (suppressClick = false), 0);
       return;
     }
-    if (e.type !== 'pointerup' || e.target.closest('.marker')) return;
+    if (e.type !== 'pointerup' || e.target.closest('.marker, .map-line-hit')) return;
     if (onPick) {
       onPick({ x: (p.x - tx) / s / size(), y: (p.y - ty) / s / size() });
       return;
@@ -182,7 +182,7 @@ export function createMapView({ onPick } = {}) {
 
   function render({ markers = [], lines = [] }) {
     svg.replaceChildren(
-      ...lines.map((l) => {
+      ...lines.flatMap((l) => {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         line.setAttribute('x1', l.from.x);
         line.setAttribute('y1', l.from.y);
@@ -190,7 +190,20 @@ export function createMapView({ onPick } = {}) {
         line.setAttribute('y2', l.to.y);
         line.setAttribute('class', `map-line ${l.kind ?? ''}`);
         line.setAttribute('vector-effect', 'non-scaling-stroke');
-        return line;
+        if (!l.onClick) return line;
+        // 細い線は押しにくいので、透明な太い線を重ねて当たり判定にする
+        const hit = line.cloneNode();
+        hit.setAttribute('class', 'map-line-hit');
+        hit.addEventListener('click', (e) => {
+          e.stopPropagation();
+          l.onClick();
+        });
+        if (l.label) {
+          const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          t.textContent = l.label;
+          hit.append(t);
+        }
+        return [line, hit];
       }),
     );
     markerLayer.replaceChildren(

@@ -466,6 +466,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   // 見直しモード：このマップの要確認の定点を、攻守・エージェントに関係なく一覧にする
   let reviewing = false;
   let selected = null; // 選んでいる着弾点のクラスター
+  let selectedId = null; // その中で選んでいる定点（立ち位置・軌道線を押したとき）
   let pendingSelect = null; // 次の描画で選ぶ着弾点
   let mode = sessionStorage.getItem('mode') ?? 'map';
   let loaded = false;
@@ -731,7 +732,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   }
 
   function renderStatus() {
-    const counts = { ok: 0, check: 0, invalid: 0 };
+    const counts = Object.fromEntries(valo.STATUSES.map((st) => [st.id, 0]));
     for (const l of lineups) {
       if (reviewing || (l.side === side && (!agentId || l.agent === agentId))) counts[valo.statusOf(l)]++;
     }
@@ -832,27 +833,48 @@ function mapView(root, { groupId, mapId, side, agentId }) {
             go({ agentId: l.agent });
             return;
           }
-          selected = selected === c ? null : c;
+          // 1 回目は選ぶだけ（軌道を確かめられるように）。選んだものをもう一度押すと詳細
+          if (selected === c) {
+            const one = c.items.length === 1 ? c.items[0] : c.items.find((i) => i.id === selectedId);
+            if (one) return openDetail(groupId, one);
+            selected = null;
+          } else {
+            selected = c;
+            selectedId = c.items.length === 1 ? c.items[0].id : null;
+          }
           render();
-          if (selected && c.items.length === 1) openDetail(groupId, c.items[0]);
         },
       };
     });
     // 立ち位置と軌道線は常にすべて出す。着弾点を選んでいるときは、それ以外を薄くする
     const lines = [];
     const fromMarkers = [];
+    if (!selected || !selected.items.some((i) => i.id === selectedId)) selectedId = null;
+    // 立ち位置・軌道線を押したとき：1 回目はその定点を選ぶ、もう一度押すと詳細
+    const pick = (c, l) => {
+      if (selectedId === l.id) return openDetail(groupId, l);
+      selected = c;
+      selectedId = l.id;
+      render();
+    };
     for (const c of clusters) {
-      const state = !selected ? '' : selected === c ? ' selected' : ' dim';
       for (const l of c.items) {
         if (valo.noFrom(l)) continue; // 立ち位置なし：着弾点（置く場所）だけ
-        lines.push({ from: l.from, to: l.to, kind: `st-${valo.statusOf(l)}${state}` });
+        const state = !selected
+          ? ''
+          : selected !== c
+            ? ' dim'
+            : !selectedId || selectedId === l.id
+              ? ' selected'
+              : '';
+        lines.push({ from: l.from, to: l.to, kind: `st-${valo.statusOf(l)}${state}`, label: l.title, onClick: () => pick(c, l) });
         fromMarkers.push({
           x: l.from.x,
           y: l.from.y,
           icon: valo.agentById(l.agent)?.icon,
           kind: `from st-${valo.statusOf(l)}${state}`,
           label: `${l.title}（立ち位置）`,
-          onClick: () => openDetail(groupId, l),
+          onClick: () => pick(c, l),
         });
       }
     }
@@ -924,7 +946,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
           { class: 'list-hint' },
           list.length
             ? agentId
-              ? `${list.length} 件。着弾点（赤）をタップすると絞り込み、立ち位置（顔）をタップすると詳細が出ます。`
+              ? `${list.length} 件。着弾点・立ち位置・軌道の線をタップで選択、もう一度タップで詳細が出ます。`
               : `${list.length} 件。エージェントを選ぶか、地図のアイコンをタップしてください。`
             : agentId
               ? 'この条件の定点はまだありません。右上の ＋ から登録できます。'

@@ -1119,6 +1119,13 @@ a {
   stroke-width: 2.5;
 }
 
+.map-line-hit {
+  stroke: transparent;
+  stroke-width: 18;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
 .map-line.dim {
   opacity: 0.2;
 }
