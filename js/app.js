@@ -585,9 +585,16 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     shortcutRow.hidden = !mine.length && !agentId;
   }
 
+  // エージェントごとの有効・要確認の数（状態の絞り込みに関係なく数える）
   function agentCounts() {
     const counts = {};
-    for (const l of lineups) if (l.side === side && statusShown(l)) counts[l.agent] = (counts[l.agent] ?? 0) + 1;
+    for (const l of lineups) {
+      if (l.side !== side) continue;
+      const st = valo.statusOf(l);
+      if (st === 'invalid') continue;
+      const c = (counts[l.agent] ??= { ok: 0, check: 0 });
+      c[st] += 1;
+    }
     return counts;
   }
 
@@ -613,7 +620,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
           },
           h('img', { src: a.icon, alt: '', draggable: 'false' }),
           h('span', { class: 'agent-name' }, a.name),
-          counts[a.id] ? h('span', { class: 'count' }, counts[a.id]) : null,
+          countBadges(counts[a.id]),
         ),
       ),
     );
@@ -1016,6 +1023,15 @@ function pickMap(currentId) {
   ]);
 }
 
+// エージェントのアイコンに付けるバッジ：赤＝有効の数、その下の小さい黄色＝要確認の数
+function countBadges(c) {
+  if (!c) return null;
+  return [
+    c.ok ? h('span', { class: 'count', title: '有効' }, c.ok) : null,
+    c.check ? h('span', { class: `count-check${c.ok ? '' : ' alone'}`, title: '要確認' }, c.check) : null,
+  ];
+}
+
 // エージェントを選ぶシート。'all' は「すべて」、閉じただけなら null
 function pickAgent(counts, currentId) {
   const tile = (a, close) =>
@@ -1024,7 +1040,7 @@ function pickAgent(counts, currentId) {
       { class: `agent-btn${a.id === currentId ? ' active' : ''}${counts[a.id] ? '' : ' none'}`, onClick: () => close(a.id) },
       h('img', { src: a.icon, alt: '', draggable: 'false' }),
       h('span', { class: 'agent-name' }, a.name),
-      counts[a.id] ? h('span', { class: 'count' }, counts[a.id]) : null,
+      countBadges(counts[a.id]),
     );
   const withLineups = master.agents.filter((a) => counts[a.id]);
   const others = master.agents.filter((a) => !counts[a.id]);

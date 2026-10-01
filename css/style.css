@@ -857,6 +857,27 @@ a {
   color: var(--text);
 }
 
+/* 要確認の数：赤い数字の下に小さい黄色 */
+.agent-btn .count-check {
+  position: absolute;
+  top: 15px;
+  right: 2px;
+  min-width: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--gold);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  color: #1a1300;
+  box-shadow: 0 0 0 1.5px var(--bg);
+}
+
+/* 有効が 0 件で要確認だけのときは、赤の位置に出す */
+.agent-btn .count-check.alone {
+  top: -4px;
+}
+
 .agent-btn .count {
   position: absolute;
   top: -4px;
