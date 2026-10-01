@@ -461,8 +461,8 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   if (!SOURCES.some((s) => s.id === source)) source = 'all';
   const shownSlots = new Set(); // 選んだアビリティだけ表示（空 = 全部）
   // 表示する状態（有効 / 要確認 / 無効）。最初は無効だけ隠す
-  const DEFAULT_STATUSES = ['ok', 'check'];
-  const shownStatuses = new Set(JSON.parse(sessionStorage.getItem('statuses') ?? 'null') ?? DEFAULT_STATUSES);
+  const DEFAULT_STATUSES = ['ok', 'ai', 'check'];
+  const shownStatuses = new Set(JSON.parse(sessionStorage.getItem('statuses2') ?? 'null') ?? DEFAULT_STATUSES);
   // 見直しモード：このマップの要確認の定点を、攻守・エージェントに関係なく一覧にする
   let reviewing = false;
   let selected = null; // 選んでいる着弾点のクラスター
@@ -608,7 +608,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
       if (l.side !== side) continue;
       const st = valo.statusOf(l);
       if (st === 'invalid') continue;
-      const c = (counts[l.agent] ??= { ok: 0, check: 0 });
+      const c = (counts[l.agent] ??= { ok: 0, ai: 0, check: 0 });
       c[st] += 1;
     }
     return counts;
@@ -760,11 +760,11 @@ function mapView(root, { groupId, mapId, side, agentId }) {
 
   // マップのアップデート時の見直し
   function reviewMenu() {
-    const ok = lineups.filter((l) => valo.statusOf(l) === 'ok');
+    const ok = lineups.filter((l) => ['ok', 'ai'].includes(valo.statusOf(l)));
     const check = lineups.filter((l) => valo.statusOf(l) === 'check');
     if (!lineups.length) return toast('このマップの定点はまだありません');
     actionSheet(`${map.name} の定点の見直し（全 ${lineups.length} 件）`, [
-      ok.length && { label: `有効な ${ok.length} 件をすべて「要確認」にする`, onClick: () => markAllCheck(ok) },
+      ok.length && { label: `有効・AI確認済みの ${ok.length} 件をすべて「要確認」にする`, onClick: () => markAllCheck(ok) },
       check.length && { label: `要確認の ${check.length} 件を確認する`, onClick: startReview },
     ].filter(Boolean));
   }
@@ -802,7 +802,8 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   function clusterStatus(c) {
     const sts = c.items.map(valo.statusOf);
     if (sts.every((st) => st === 'invalid')) return 'invalid';
-    return sts.includes('check') ? 'check' : 'ok';
+    if (sts.includes('check')) return 'check';
+    return sts.includes('ok') ? 'ok' : 'ai';
   }
 
   function renderMap(list) {
@@ -883,10 +884,8 @@ function mapView(root, { groupId, mapId, side, agentId }) {
         ),
       ),
       st === 'ok'
-        ? valo.isAiChecked(l)
-          ? h('span', { class: 'status-badge st-ai', title: l.statusNote ?? '' }, 'AI確認')
-          : h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance))
-        : h('span', { class: `status-badge st-${st}` }, valo.label(valo.STATUSES, st)),
+        ? h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance))
+        : h('span', { class: `status-badge st-${st}`, title: l.statusNote ?? '' }, valo.label(valo.STATUSES, st)),
     );
     if (!reviewing) return card;
     // 見直し中：その場で「有効」「無効」を決められるようにする
@@ -1045,10 +1044,12 @@ function pickMap(currentId) {
 // エージェントのアイコンに付けるバッジ：赤＝有効の数、その下の小さい黄色＝要確認の数
 function countBadges(c) {
   if (!c) return null;
-  return [
+  const items = [
     c.ok ? h('span', { class: 'count', title: '有効' }, c.ok) : null,
-    c.check ? h('span', { class: `count-check${c.ok ? '' : ' alone'}`, title: '要確認' }, c.check) : null,
-  ];
+    c.ai ? h('span', { class: 'count-ai', title: 'AI確認済み' }, c.ai) : null,
+    c.check ? h('span', { class: 'count-check', title: '要確認' }, c.check) : null,
+  ].filter(Boolean);
+  return items.length ? h('span', { class: 'count-stack' }, items) : null;
 }
 
 // エージェントを選ぶシート。'all' は「すべて」、閉じただけなら null
@@ -1211,10 +1212,10 @@ function statusBox(groupId, l) {
           ),
         ),
       ),
-      valo.isAiChecked(l)
-        ? h('p', { class: 'status-note ai' }, '✓ AI が動画を見て、立ち位置・着弾位置・画像を確認しました。', l.statusNote ? `（${l.statusNote}）` : '', ` ${when}`)
+      st === 'ai'
+        ? h('p', { class: 'status-note ai' }, '◆ AI が投稿や動画をもとに登録・確認した定点です。人が使って確かめたら「有効」にしてください。', l.statusNote ? `（${l.statusNote}）` : '', ` ${when}`)
         : null,
-      st !== 'ok'
+      st === 'check' || st === 'invalid'
         ? h(
             'p',
             { class: 'status-note' },
@@ -1962,7 +1963,7 @@ function statsView(root, { groupId }) {
 
   // { total, ok, check, invalid } を数える
   const tally = (list) => {
-    const t = { total: 0, ok: 0, check: 0, invalid: 0 };
+    const t = { total: 0, ok: 0, ai: 0, check: 0, invalid: 0 };
     for (const l of list) {
       const st = valo.statusOf(l);
       t[st] += 1;
@@ -1977,6 +1978,7 @@ function statsView(root, { groupId }) {
       'span',
       { class: 'stat-bar', style: `width:${max ? Math.max(4, (t.total / max) * 100) : 0}%` },
       h('span', { class: 'ok', style: `flex:${t.ok}` }),
+      h('span', { class: 'ai', style: `flex:${t.ai}` }),
       h('span', { class: 'check', style: `flex:${t.check}` }),
     );
 
@@ -2021,13 +2023,14 @@ function statsView(root, { groupId }) {
       // 合計
       h(
         'div',
-        { class: 'stat-cards' },
+        { class: 'stat-cards five' },
         h('div', { class: 'stat-card' }, h('strong', {}, all.total), h('span', {}, '定点')),
         h('div', { class: 'stat-card ok' }, h('strong', {}, all.ok), h('span', {}, '有効')),
+        h('div', { class: 'stat-card ai' }, h('strong', {}, all.ai), h('span', {}, 'AI確認済み')),
         h('div', { class: 'stat-card check' }, h('strong', {}, all.check), h('span', {}, '要確認')),
         h('div', { class: 'stat-card muted' }, h('strong', {}, all.invalid), h('span', {}, '無効')),
       ),
-      h('p', { class: 'stats-legend' }, h('span', { class: 'dot ok' }), '有効', h('span', { class: 'dot check' }), '要確認', '　数字は有効＋要確認'),
+      h('p', { class: 'stats-legend' }, h('span', { class: 'dot ok' }), '有効', h('span', { class: 'dot ai' }), 'AI確認済み', h('span', { class: 'dot check' }), '要確認', '　数字は無効以外の合計'),
 
       // マップ × 攻守
       h('p', { class: 'section-label' }, 'マップ × 攻守'),
@@ -2075,7 +2078,7 @@ function statsView(root, { groupId }) {
                 'td',
                 { class: 'bar-col' },
                 h('span', { class: 'bar-line' }, splitBar(t, agentMax), h('span', { class: 'num' }, t.total)),
-                h('span', { class: 'sub' }, `有効 ${t.ok} ・ 要確認 ${t.check}`),
+                h('span', { class: 'sub' }, `有効 ${t.ok} ・ AI ${t.ai} ・ 要確認 ${t.check}`),
               ),
               valo.SLOTS.map((s) => {
                 const n = list.filter((l) => l.agent === a.id && l.ability === s.slot && valo.statusOf(l) !== 'invalid').length;

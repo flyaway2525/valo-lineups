@@ -116,7 +116,7 @@ service cloud.firestore {
 
         // 状態（有効 / 要確認 / 無効）。古いデータには無いので、あるときだけ確かめる
         function isValidStatus(d) {
-          return (!('status' in d) || d.status in ['ok', 'check', 'invalid'])
+          return (!('status' in d) || d.status in ['ok', 'ai', 'check', 'invalid'])
             && (!('statusNote' in d) || (d.statusNote is string && d.statusNote.size() <= 200))
             && (!('statusByName' in d) || (d.statusByName is string && d.statusByName.size() <= 40))
             && (!('statusAt' in d) || d.statusAt is number);

@@ -65,20 +65,16 @@ export function isCompetitive(mapId) {
   return COMPETITIVE_MAPS.includes(mapId);
 }
 
-// 定点の状態。マップのアップデートで使えなくなったかもしれないものを「要確認」にする
+// 定点の状態。有効＝人が確認、AI確認済み＝AI が投稿・動画から確認（人は未確認）、
+// 要確認＝マップのアップデートなどで使えなくなったかもしれない
 export const STATUSES = [
   { id: 'ok', label: '有効', icon: '●' },
+  { id: 'ai', label: 'AI確認済み', icon: '◆' },
   { id: 'check', label: '要確認', icon: '⚠' },
   { id: 'invalid', label: '無効', icon: '✕' },
 ];
 
 // 状態がない定点（古いデータ）は「有効」
-// AI が動画を見て位置・画像を確かめた定点（状態は「有効」、確認者名で見分ける）
-export const AI_CHECKER = 'AI確認';
-export function isAiChecked(lineup) {
-  return statusOf(lineup) === 'ok' && lineup.statusByName === AI_CHECKER;
-}
-
 export function statusOf(lineup) {
   return lineup.status ?? 'ok';
 }

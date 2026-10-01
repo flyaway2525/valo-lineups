@@ -10,6 +10,7 @@
   --accent-soft: rgb(255 70 85 / 0.16);
   --from: #3ee6c4;
   --gold: #f5c451;
+  --ai: #7cc4ff;
   --danger: #ff6b76;
   --radius: 14px;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -2318,8 +2319,82 @@ button.group-label {
 
 /* AI が動画で確認した定点 */
 .status-badge.st-ai {
-  background: #7cc4ff;
+  background: var(--ai);
   color: #0b1a26;
+}
+
+.status-chip.st-ai.active {
+  border-color: var(--ai);
+  background: rgb(124 196 255 / 0.15);
+  color: var(--ai);
+}
+
+.status-seg button.st-ai.active {
+  background: var(--ai);
+  color: #0b1a26;
+}
+
+.status-box.st-ai {
+  border-color: rgb(124 196 255 / 0.6);
+}
+
+.marker.st-ai {
+  border-color: var(--ai);
+}
+
+.map-line.st-ai {
+  stroke: var(--ai);
+}
+
+.stat-bar .ai,
+.dot.ai {
+  background: var(--ai);
+}
+
+.stat-card.ai strong {
+  color: var(--ai);
+}
+
+.stat-cards.five {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+/* エージェントの数字：赤＝有効、青＝AI確認済み、黄＝要確認（縦に並べる） */
+.agent-btn .count-stack {
+  position: absolute;
+  top: -4px;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.agent-btn .count-stack .count {
+  position: static;
+}
+
+.agent-btn .count-ai,
+.agent-btn .count-check {
+  min-width: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--bg);
+}
+
+.agent-btn .count-ai {
+  background: var(--ai);
+  color: #0b1a26;
+}
+
+.agent-btn .count-check {
+  position: static;
+  background: var(--gold);
+  color: #1a1300;
 }
 
 .status-note.ai {
