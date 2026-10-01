@@ -3,7 +3,7 @@
 // （開発中に古いファイルが表示され続けるのを避けるため）。
 // マップ・エージェントの画像は中身が変わらないので、キャッシュ優先にして 2 回目以降すぐ出す。
 
-const CACHE = 'valo-lineups-v12';
+const CACHE = 'valo-lineups-v13';
 const ASSETS = 'valo-lineups-assets-v1';
 const SHELL = [
   './',

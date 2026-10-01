@@ -1320,7 +1320,12 @@ function openDetail(groupId, l) {
         'div',
         { class: 'detail-actions' },
         favBtn,
-        h('button', { class: 'btn', onClick: () => share(shareTitle(l), lineupUrl(groupId, l.id), 'タイトル付きでリンクをコピーしました', true) }, 'リンク'),
+        h('button', { class: 'btn', onClick: () =>
+            actionSheet('リンクを共有', [
+              { label: 'リンク＋説明', onClick: () => share(shareTitle(l), lineupUrl(groupId, l.id), '説明付きでリンクをコピーしました', true) },
+              { label: 'リンクのみ', onClick: () => share(shareTitle(l), lineupUrl(groupId, l.id), 'リンクをコピーしました') },
+            ]),
+        }, 'リンク'),
         h('a', { class: 'btn', href: `#/g/${groupId}/edit/${l.id}`, onClick: () => close(null) }, '編集'),
         groups.length > 1
           ? h(
