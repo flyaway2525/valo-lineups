@@ -3,7 +3,7 @@
 //
 //   const mv = createMapView({ onPick });   // onPick を渡すと、空いている所のタップで座標を返す（登録画面用）
 //   mv.setMap(map);                          // valo.js のマップ
-//   mv.render({ markers, lines });           // markers: [{ x, y, icon, kind, label, onClick }]
+//   mv.render({ markers, lines });           // markers: [{ x, y, icon, kind, label, onClick, dragKey, onDragEnd }]
 //                                            // lines:   [{ from: {x,y}, to: {x,y}, kind }]
 
 import { h } from './ui.js';
@@ -190,6 +190,8 @@ export function createMapView({ onPick } = {}) {
         line.setAttribute('y2', l.to.y);
         line.setAttribute('class', `map-line ${l.kind ?? ''}`);
         line.setAttribute('vector-effect', 'non-scaling-stroke');
+        if (l.fromKey) line.dataset.fromKey = l.fromKey;
+        if (l.toKey) line.dataset.toKey = l.toKey;
         if (!l.onClick) return line;
         // 細い線は押しにくいので、透明な太い線を重ねて当たり判定にする
         const hit = line.cloneNode();
@@ -207,12 +209,12 @@ export function createMapView({ onPick } = {}) {
       }),
     );
     markerLayer.replaceChildren(
-      ...markers.map((m) =>
-        h(
+      ...markers.map((m) => {
+        const mk = h(
           m.onClick ? 'button' : 'span',
           {
             type: m.onClick ? 'button' : null,
-            class: `marker ${m.kind ?? ''}`,
+            class: `marker ${m.kind ?? ''}${m.onDragEnd ? ' draggable' : ''}`,
             style: `left:${m.x * 100}%;top:${m.y * 100}%`,
             'aria-label': m.label,
             title: m.label,
@@ -220,9 +222,49 @@ export function createMapView({ onPick } = {}) {
           },
           m.icon ? h('img', { src: m.icon, alt: '', draggable: 'false' }) : null,
           m.badge ? h('span', { class: 'marker-badge' }, m.badge) : null,
-        ),
-      ),
+        );
+        if (m.onDragEnd) makeDraggable(mk, m);
+        return mk;
+      }),
     );
+  }
+
+  // マーカーをドラッグして位置を微調整する（登録画面）。動かしている間は線も一緒に動かす
+  function makeDraggable(mk, m) {
+    let p = null;
+    const toMap = (e) => {
+      const q = local(e);
+      return {
+        x: Math.min(1, Math.max(0, (q.x - tx) / s / size())),
+        y: Math.min(1, Math.max(0, (q.y - ty) / s / size())),
+      };
+    };
+    mk.addEventListener('pointerdown', (e) => {
+      e.stopPropagation(); // 地図の移動を始めない
+      e.preventDefault();
+      mk.setPointerCapture(e.pointerId);
+      mk.classList.add('dragging');
+      p = { x: m.x, y: m.y };
+    });
+    mk.addEventListener('pointermove', (e) => {
+      if (!p) return;
+      p = toMap(e);
+      mk.style.left = `${p.x * 100}%`;
+      mk.style.top = `${p.y * 100}%`;
+      if (m.dragKey) {
+        svg.querySelectorAll(`[data-from-key="${m.dragKey}"]`).forEach((l) => (l.setAttribute('x1', p.x), l.setAttribute('y1', p.y)));
+        svg.querySelectorAll(`[data-to-key="${m.dragKey}"]`).forEach((l) => (l.setAttribute('x2', p.x), l.setAttribute('y2', p.y)));
+      }
+    });
+    const done = () => {
+      if (!p) return;
+      const q = p;
+      p = null;
+      mk.classList.remove('dragging');
+      m.onDragEnd({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) });
+    };
+    mk.addEventListener('pointerup', done);
+    mk.addEventListener('pointercancel', done);
   }
 
   function resetZoom() {

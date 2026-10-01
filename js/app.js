@@ -1589,16 +1589,23 @@ function buildEditor(body, groupId, orig, defaults) {
     );
     const agent = valo.agentById(f.agent);
     const markers = [];
-    if (f.from && !f.anyFrom) markers.push({ ...f.from, kind: 'from', icon: agent?.icon, label: '立ち位置' });
-    if (f.to) markers.push({ ...f.to, kind: `target selected${f.anyFrom ? ' placed' : ''}`, icon: valo.abilityOf(f.agent, f.ability)?.icon, label: f.anyFrom ? '置く場所' : '着弾点' });
-    mv.render({ markers, lines: f.from && f.to && !f.anyFrom ? [{ from: f.from, to: f.to, kind: 'selected' }] : [] });
+    // 置いたマーカーはドラッグで微調整できる
+    const moved = (which) => (p) => {
+      f[which] = p;
+      if (which === 'to') autoFill();
+      renderPlacing();
+      renderSites();
+    };
+    if (f.from && !f.anyFrom) markers.push({ ...f.from, kind: 'from', icon: agent?.icon, label: '立ち位置（ドラッグで調整）', dragKey: 'from', onDragEnd: moved('from') });
+    if (f.to) markers.push({ ...f.to, kind: `target selected${f.anyFrom ? ' placed' : ''}`, icon: valo.abilityOf(f.agent, f.ability)?.icon, label: `${f.anyFrom ? '置く場所' : '着弾点'}（ドラッグで調整）`, dragKey: 'to', onDragEnd: moved('to') });
+    mv.render({ markers, lines: f.from && f.to && !f.anyFrom ? [{ from: f.from, to: f.to, kind: 'selected', fromKey: 'from', toKey: 'to' }] : [] });
     mapHint.textContent = f.anyFrom
-      ? 'スモークなど、どこからでも置けるスキルです。置く場所だけタップしてください。'
+      ? 'スモークなど、どこからでも置けるスキルです。置く場所だけタップしてください（ドラッグで微調整）。'
       : placing === 'from'
         ? '地図をタップ（クリック）して立ち位置を置いてください。ホイール・ピンチで拡大できます。'
         : placing === 'to'
           ? '次に着弾点を置いてください。'
-          : '置き直すときは ① / ② を選んでからタップします。';
+          : 'マーカーをドラッグすると微調整できます。置き直すときは ① / ② を選んでからタップします。';
   }
 
   function renderAgents() {

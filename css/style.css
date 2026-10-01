@@ -2427,3 +2427,15 @@ button.group-label {
   white-space: nowrap;
   color: var(--muted);
 }
+
+/* 登録画面：置いたマーカーはドラッグで動かせる */
+.marker.draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.marker.draggable.dragging {
+  cursor: grabbing;
+  z-index: 10;
+  transform: translate(-50%, -50%) scale(calc(1.25 / var(--s)));
+}
