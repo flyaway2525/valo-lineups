@@ -1114,23 +1114,24 @@ function openLightbox(src) {
   document.body.append(box);
 }
 
-function imageCarousel(groupId, l) {
+// captions：画像ごとの説明（メモの「立ち位置 : …」など）。画像の下に出して、画像と一緒に横に送る
+function imageCarousel(groupId, l, captions = []) {
   const ids = l.imageIds ?? [];
   const labels = valo.imageLabels(l);
-  const slots = labels.map((label, i) => ({ label, id: ids[i] })).filter((s) => s.id);
+  const slots = labels.map((label, i) => ({ label, id: ids[i], text: captions[i] })).filter((s) => s.id);
   if (!slots.length) return null;
 
-  const figs = slots.map(({ label, id }) => {
-    const fig = h('figure', { class: 'shot loading' }, h('figcaption', {}, label));
+  const figs = slots.map(({ label, id, text }) => {
+    const frame = h('div', { class: 'shot-frame loading' }, h('span', { class: 'shot-label' }, label));
     store
       .getImage(groupId, id)
       .then((img) => {
-        fig.classList.remove('loading');
-        if (!img) return fig.append(h('span', { class: 'shot-missing' }, '画像がありません'));
-        fig.prepend(h('img', { src: img.data, alt: label, onClick: () => openLightbox(img.data) }));
+        frame.classList.remove('loading');
+        if (!img) return frame.append(h('span', { class: 'shot-missing' }, '画像がありません'));
+        frame.prepend(h('img', { src: img.data, alt: label, onClick: () => openLightbox(img.data) }));
       })
-      .catch(() => fig.append(h('span', { class: 'shot-missing' }, '読み込めませんでした')));
-    return fig;
+      .catch(() => frame.append(h('span', { class: 'shot-missing' }, '読み込めませんでした')));
+    return h('figure', { class: 'shot' }, frame, text ? h('figcaption', { class: 'shot-text' }, text) : null);
   });
   const track = h('div', { class: 'carousel' }, figs);
   if (figs.length === 1) return track;
@@ -1265,6 +1266,7 @@ function statusBox(groupId, l) {
 function openDetail(groupId, l) {
   const agent = valo.agentById(l.agent);
   const ability = valo.abilityOf(l.agent, l.ability);
+  const notesParts = valo.splitNotes(l);
   const embed = l.videoUrl && youtubeEmbed(l.videoUrl);
   const key = favKey(groupId, l.id);
   const byLine = [`登録：${l.createdByName}`, l.updatedBy && l.updatedBy !== l.createdBy ? `更新：${l.updatedByName}` : null].filter(Boolean).join(' ・ ');
@@ -1309,8 +1311,9 @@ function openDetail(groupId, l) {
         h('span', { class: 'badge muted' }, byLine),
       ),
       statusBox(groupId, l),
-      imageCarousel(groupId, l),
-      l.notes ? h('p', { class: 'notes' }, l.notes) : null,
+      notesParts.top ? h('p', { class: 'notes summary' }, notesParts.top) : null,
+      imageCarousel(groupId, l, notesParts.captions),
+      notesParts.bottom ? h('p', { class: 'notes' }, h('span', { class: 'notes-label' }, '備考'), notesParts.bottom) : null,
       embed
         ? h('div', { class: 'video' }, h('iframe', { src: embed, title: '動画', allow: 'encrypted-media; picture-in-picture; fullscreen', allowfullscreen: true, loading: 'lazy' }))
         : l.videoUrl
@@ -1489,7 +1492,12 @@ function buildEditor(body, groupId, orig, defaults) {
     f.title = titleInput.value;
     titleTouched = true;
   });
-  const notesInput = h('textarea', { class: 'text-area', maxlength: 2000, rows: 3, placeholder: '例：看板の右上の角に照準を合わせて、W を押しながらジャンプ投げ' });
+  const notesInput = h('textarea', { class: 'text-area', maxlength: 2000, rows: 5, placeholder: '例：
+2バウンス・フルチャージ
+立ち位置 : 箱1段目の角
+照準 : 出っ張ったツタの角
+着弾 : B サイト中
+（「立ち位置 :」などの行は各画像の下に表示）' });
   notesInput.value = f.notes;
   notesInput.addEventListener('input', () => (f.notes = notesInput.value));
   const videoInput = h('input', { class: 'text-input', type: 'url', maxlength: 300, placeholder: 'YouTube・Medal などのリンク（任意）' });

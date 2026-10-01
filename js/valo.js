@@ -52,6 +52,36 @@ export function noFrom(lineup) {
   return lineup.anyFrom === true;
 }
 
+// メモを「概要（上）／画像ごとの説明／備考（下）」に分ける。
+// 「立ち位置 : …」「照準 : …」「着弾 : …」の行は対応する画像の下に出す。
+// それより前の行は概要、後の行（「備考 :」も含む）は備考
+const CAPTION_KEYS = [
+  ['立ち位置', '置く画面'],
+  ['照準', '外から見た様子', '置く場所'],
+  ['着弾', '効果', '補足'],
+];
+export function splitNotes(lineup) {
+  const caps = [[], [], []];
+  const top = [];
+  const bottom = [];
+  let seenCaption = false;
+  for (const raw of (lineup.notes ?? '').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^([^:：]{1,12}?)\s*[:：]\s*(.*)$/);
+    const slot = m ? CAPTION_KEYS.findIndex((keys) => keys.includes(m[1].trim())) : -1;
+    if (slot >= 0 && lineup.imageIds?.[slot]) {
+      caps[slot].push(m[2]);
+      seenCaption = true;
+    } else if (m && m[1].trim() === '備考') {
+      bottom.push(m[2]);
+    } else {
+      (seenCaption ? bottom : top).push(line);
+    }
+  }
+  return { top: top.join('\n'), captions: caps.map((c) => c.join('\n')), bottom: bottom.join('\n') };
+}
+
 export function imageLabels(lineup) {
   return noFrom(lineup) ? PLACED_IMAGE_LABELS : IMAGE_LABELS;
 }

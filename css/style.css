@@ -1492,14 +1492,43 @@ a {
 }
 
 .shot {
-  position: relative;
   flex: 0 0 88%;
   margin: 0;
+  scroll-snap-align: center;
+}
+
+/* 画像（縦長の画像も切らずに全体を見せる） */
+.shot-frame {
+  position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: 12px;
+  background: #0a1219;
+}
+
+/* 画像ごとの説明（メモの「立ち位置 : …」など）。画像と一緒に横に送る */
+.shot-text {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
   background: var(--surface);
-  scroll-snap-align: center;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.notes.summary {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+.notes-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
 }
 
 .shot:only-child {
@@ -1510,11 +1539,11 @@ a {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   cursor: zoom-in;
 }
 
-.shot figcaption {
+.shot-label {
   position: absolute;
   top: 8px;
   left: 8px;
@@ -1525,7 +1554,7 @@ a {
   font-weight: 700;
 }
 
-.shot.loading::after {
+.shot-frame.loading::after {
   content: '';
   position: absolute;
   inset: 0;
