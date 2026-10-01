@@ -114,13 +114,23 @@ function youtubeEmbed(url) {
   }
 }
 
-async function share(title, url, copiedMessage) {
+// withText = true なら、貼り付け先（Discord など）でも内容が分かるようにタイトルを URL の前に付ける
+async function share(title, url, copiedMessage, withText = false) {
+  const text = withText ? `${title}
+${url}` : url;
   if (navigator.share && matchMedia('(pointer: coarse)').matches) {
-    await navigator.share({ title, url }).catch(() => {});
+    await navigator.share(withText ? { title, text } : { title, url }).catch(() => {});
   } else {
-    await navigator.clipboard.writeText(url).catch(() => {});
+    await navigator.clipboard.writeText(text).catch(() => {});
     toast(copiedMessage);
   }
+}
+
+// 共有用のタイトル。例：「アセント攻めソーヴァ：A サイトのワイヤー切りショック」
+function shareTitle(l) {
+  const map = valo.mapById(l.map)?.name ?? '';
+  const agent = valo.agentById(l.agent)?.name ?? '';
+  return `${map}${valo.label(valo.SIDES, l.side)}${agent}：${l.title}`;
 }
 
 // ---- アカウント ----
@@ -1310,7 +1320,7 @@ function openDetail(groupId, l) {
         'div',
         { class: 'detail-actions' },
         favBtn,
-        h('button', { class: 'btn', onClick: () => share(l.title, lineupUrl(groupId, l.id), 'リンクをコピーしました') }, 'リンク'),
+        h('button', { class: 'btn', onClick: () => share(shareTitle(l), lineupUrl(groupId, l.id), 'タイトル付きでリンクをコピーしました', true) }, 'リンク'),
         h('a', { class: 'btn', href: `#/g/${groupId}/edit/${l.id}`, onClick: () => close(null) }, '編集'),
         groups.length > 1
           ? h(
