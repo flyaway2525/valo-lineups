@@ -56,6 +56,12 @@ export const STATUSES = [
 ];
 
 // 状態がない定点（古いデータ）は「有効」
+// AI が動画を見て位置・画像を確かめた定点（状態は「有効」、確認者名で見分ける）
+export const AI_CHECKER = 'AI確認';
+export function isAiChecked(lineup) {
+  return statusOf(lineup) === 'ok' && lineup.statusByName === AI_CHECKER;
+}
+
 export function statusOf(lineup) {
   return lineup.status ?? 'ok';
 }

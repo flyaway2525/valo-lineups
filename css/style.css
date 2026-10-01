@@ -2315,3 +2315,13 @@ a {
 button.group-label {
   cursor: pointer;
 }
+
+/* AI が動画で確認した定点 */
+.status-badge.st-ai {
+  background: #7cc4ff;
+  color: #0b1a26;
+}
+
+.status-note.ai {
+  color: #9fd3ff;
+}

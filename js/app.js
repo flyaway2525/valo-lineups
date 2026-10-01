@@ -882,7 +882,9 @@ function mapView(root, { groupId, mapId, side, agentId }) {
         ),
       ),
       st === 'ok'
-        ? h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance))
+        ? valo.isAiChecked(l)
+          ? h('span', { class: 'status-badge st-ai', title: l.statusNote ?? '' }, 'AI確認')
+          : h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance))
         : h('span', { class: `status-badge st-${st}` }, valo.label(valo.STATUSES, st)),
     );
     if (!reviewing) return card;
@@ -1207,6 +1209,9 @@ function statusBox(groupId, l) {
           ),
         ),
       ),
+      valo.isAiChecked(l)
+        ? h('p', { class: 'status-note ai' }, '✓ AI が動画を見て、立ち位置・着弾位置・画像を確認しました。', l.statusNote ? `（${l.statusNote}）` : '', ` ${when}`)
+        : null,
       st !== 'ok'
         ? h(
             'p',
