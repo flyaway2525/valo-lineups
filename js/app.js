@@ -1492,12 +1492,7 @@ function buildEditor(body, groupId, orig, defaults) {
     f.title = titleInput.value;
     titleTouched = true;
   });
-  const notesInput = h('textarea', { class: 'text-area', maxlength: 2000, rows: 5, placeholder: '例：
-2バウンス・フルチャージ
-立ち位置 : 箱1段目の角
-照準 : 出っ張ったツタの角
-着弾 : B サイト中
-（「立ち位置 :」などの行は各画像の下に表示）' });
+  const notesInput = h('textarea', { class: 'text-area', maxlength: 2000, rows: 5, placeholder: '例：\n2バウンス・フルチャージ\n立ち位置 : 箱1段目の角\n照準 : 出っ張ったツタの角\n着弾 : B サイト中\n（「立ち位置 :」などの行は各画像の下に表示）' });
   notesInput.value = f.notes;
   notesInput.addEventListener('input', () => (f.notes = notesInput.value));
   const videoInput = h('input', { class: 'text-input', type: 'url', maxlength: 300, placeholder: 'YouTube・Medal などのリンク（任意）' });
