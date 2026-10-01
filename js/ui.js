@@ -61,6 +61,11 @@ export function gearIcon() {
   );
 }
 
+// 棒グラフ（集計）
+export function chartIcon() {
+  return lineIcon('<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>');
+}
+
 export function progressBar(done, total) {
   const pct = total ? Math.round((done / total) * 100) : 0;
   return h(

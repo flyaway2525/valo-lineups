@@ -1,7 +1,7 @@
 import * as auth from './auth.js';
 import * as store from './store.js';
 import * as valo from './valo.js';
-import { h, setChildren, header, actionSheet, confirmSheet, askText, openSheet, toast, qrCode, userIcon, gearIcon } from './ui.js';
+import { h, setChildren, header, actionSheet, confirmSheet, askText, openSheet, toast, qrCode, userIcon, gearIcon, chartIcon } from './ui.js';
 import { createMapView } from './mapview.js';
 import { compressImage, imageFromTransfer } from './images.js';
 
@@ -364,6 +364,8 @@ function groupsView(root) {
                     h('span', { class: 'card-sub' }, `${g.memberIds.length} 人${g.members[auth.currentUser().uid]?.role === 'owner' ? ' ・ オーナー' : ''}`),
                   ),
                 ),
+                // 定点の集計
+                h('a', { class: 'group-settings', href: `#/g/${g.id}/stats`, 'aria-label': `${g.name} の集計`, title: '定点の集計' }, chartIcon()),
                 // グループの設定（名前・メンバー・招待）
                 h('a', { class: 'group-settings', href: `#/g/${g.id}/settings`, 'aria-label': `${g.name} の設定`, title: 'グループの設定' }, gearIcon()),
               ),
@@ -496,7 +498,21 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     onClick: () => pickAgent(agentCounts(), agentId).then((r) => r && go({ agentId: r === 'all' ? null : r })),
   });
   const groupName = h('span', {});
-  const groupLabel = h('span', { class: 'group-label' }, groupName);
+  // グループ名を押すと：集計・設定・グループ一覧
+  const groupLabel = h(
+    'button',
+    {
+      class: 'group-label',
+      onClick: () =>
+        actionSheet(groupById(groupId)?.name ?? 'グループ', [
+          { label: '定点の集計を見る', onClick: () => (location.hash = `#/g/${groupId}/stats`) },
+          { label: 'グループの設定', onClick: () => (location.hash = `#/g/${groupId}/settings`) },
+          { label: 'グループ一覧へ', onClick: () => (location.hash = '#/groups') },
+        ]),
+    },
+    groupName,
+    h('span', { class: 'caret' }, '▾'),
+  );
   const topbar = h(
     'header',
     { class: 'topbar map-topbar' },
@@ -1817,6 +1833,7 @@ function groupSettingsView(root, { groupId }) {
         ),
       ),
       h('a', { class: 'btn wide-link open-group', href: `#/g/${groupId}` }, 'このグループの定点を開く ›'),
+      h('a', { class: 'btn wide-link open-group', href: `#/g/${groupId}/stats` }, '定点の集計を見る ›'),
       h('p', { class: 'section-label' }, '招待'),
       h(
         'div',
@@ -1900,6 +1917,186 @@ function groupSettingsView(root, { groupId }) {
   return subscribe(render);
 }
 
+// ---- 画面：定点の集計 ----
+// どのマップ・攻守・エージェント・スキルの定点が多いか。数字＝有効＋要確認（無効は除く）、
+// 色分けで有効（緑）と要確認（黄）の内訳。マス・行を押すとその条件で地図を開く
+
+function statsView(root, { groupId }) {
+  const body = h('main', { class: 'content stats' });
+  root.append(header({ title: '定点の集計', back: lastViewHash(groupId) }), body);
+  let lineups = null;
+  let side = 'all';
+
+  const MAP_SHORT = { abyss: 'アビ', ascent: 'アセ', haven: 'ヘイ', lotus: 'ロー', split: 'スプ', summit: 'サミ', sunset: 'サン' };
+  const shortName = (m) => MAP_SHORT[m.id] ?? m.name.slice(0, 2);
+
+  // { total, ok, check, invalid } を数える
+  const tally = (list) => {
+    const t = { total: 0, ok: 0, check: 0, invalid: 0 };
+    for (const l of list) {
+      const st = valo.statusOf(l);
+      t[st] += 1;
+      if (st !== 'invalid') t.total += 1;
+    }
+    return t;
+  };
+
+  // 有効・要確認の割合の細い棒
+  const splitBar = (t, max) =>
+    h(
+      'span',
+      { class: 'stat-bar', style: `width:${max ? Math.max(4, (t.total / max) * 100) : 0}%` },
+      h('span', { class: 'ok', style: `flex:${t.ok}` }),
+      h('span', { class: 'check', style: `flex:${t.check}` }),
+    );
+
+  const heat = (n, max) => (n ? `background: rgb(255 70 85 / ${(0.12 + 0.6 * (n / max)).toFixed(2)})` : '');
+
+  const open = (o) => {
+    const v = storageGet(lastViewKey(groupId)) ?? {};
+    location.hash = viewHash(groupId, {
+      mapId: o.mapId ?? v.mapId ?? master.maps[0].id,
+      side: o.side ?? (side === 'all' ? v.side ?? 'atk' : side),
+      agentId: o.agentId ?? null,
+    });
+  };
+
+  function render() {
+    if (!lineups) return setChildren(body, h('p', { class: 'muted' }, '読み込み中…'));
+    const list = lineups.filter((l) => side === 'all' || l.side === side);
+    const all = tally(list);
+    const maps = master.maps.filter((m) => valo.isCompetitive(m.id) || list.some((l) => l.map === m.id));
+    const agents = master.agents
+      .map((a) => ({ a, t: tally(list.filter((l) => l.agent === a.id)) }))
+      .filter((x) => x.t.total + x.t.invalid)
+      .sort((x, y) => y.t.total - x.t.total);
+    const byMapSide = (mapId, sd) => tally(lineups.filter((l) => l.map === mapId && l.side === sd));
+    const mapMax = Math.max(1, ...maps.flatMap((m) => ['atk', 'def'].map((sd) => byMapSide(m.id, sd).total)));
+    const agentMax = Math.max(1, ...agents.map((x) => x.t.total));
+    const cell = (agentId, mapId) => list.filter((l) => l.agent === agentId && l.map === mapId && valo.statusOf(l) !== 'invalid').length;
+    const cellMax = Math.max(1, ...agents.flatMap((x) => maps.map((m) => cell(x.a.id, m.id))));
+
+    setChildren(
+      body,
+      // 攻守の絞り込み
+      h(
+        'div',
+        { class: 'segmented stats-side' },
+        [
+          ['all', 'すべて'],
+          ['atk', '攻め'],
+          ['def', '守り'],
+        ].map(([id, label]) => h('button', { class: id === side ? 'active' : '', onClick: () => ((side = id), render()) }, label)),
+      ),
+      // 合計
+      h(
+        'div',
+        { class: 'stat-cards' },
+        h('div', { class: 'stat-card' }, h('strong', {}, all.total), h('span', {}, '定点')),
+        h('div', { class: 'stat-card ok' }, h('strong', {}, all.ok), h('span', {}, '有効')),
+        h('div', { class: 'stat-card check' }, h('strong', {}, all.check), h('span', {}, '要確認')),
+        h('div', { class: 'stat-card muted' }, h('strong', {}, all.invalid), h('span', {}, '無効')),
+      ),
+      h('p', { class: 'stats-legend' }, h('span', { class: 'dot ok' }), '有効', h('span', { class: 'dot check' }), '要確認', '　数字は有効＋要確認'),
+
+      // マップ × 攻守
+      h('p', { class: 'section-label' }, 'マップ × 攻守'),
+      h(
+        'table',
+        { class: 'stat-table' },
+        h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', {}, '攻め'), h('th', {}, '守り'))),
+        h(
+          'tbody',
+          {},
+          maps.map((m) =>
+            h(
+              'tr',
+              { class: valo.isCompetitive(m.id) ? '' : 'off-pool' },
+              h('th', {}, m.name),
+              ['atk', 'def'].map((sd) => {
+                const t = byMapSide(m.id, sd);
+                return h(
+                  'td',
+                  { class: 'tap', onClick: () => open({ mapId: m.id, side: sd }) },
+                  h('span', { class: 'num' }, t.total || '–'),
+                  t.total ? splitBar(t, mapMax) : null,
+                );
+              }),
+            ),
+          ),
+        ),
+      ),
+
+      // エージェント × スキル
+      h('p', { class: 'section-label' }, `エージェント（${agents.length}）`),
+      h(
+        'table',
+        { class: 'stat-table agents' },
+        h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', { class: 'bar-col' }, '件数'), valo.SLOTS.map((s) => h('th', { class: 'slot' }, s.key)))),
+        h(
+          'tbody',
+          {},
+          agents.map(({ a, t }) =>
+            h(
+              'tr',
+              { class: 'tap', onClick: () => open({ agentId: a.id }) },
+              h('th', {}, h('span', { class: 'agent-cell' }, h('img', { src: a.icon, alt: '' }), a.name)),
+              h(
+                'td',
+                { class: 'bar-col' },
+                h('span', { class: 'bar-line' }, splitBar(t, agentMax), h('span', { class: 'num' }, t.total)),
+                h('span', { class: 'sub' }, `有効 ${t.ok} ・ 要確認 ${t.check}`),
+              ),
+              valo.SLOTS.map((s) => {
+                const n = list.filter((l) => l.agent === a.id && l.ability === s.slot && valo.statusOf(l) !== 'invalid').length;
+                return h('td', { class: `slot${n ? '' : ' zero'}` }, n || '·');
+              }),
+            ),
+          ),
+        ),
+      ),
+
+      // エージェント × マップ
+      h('p', { class: 'section-label' }, 'エージェント × マップ'),
+      h(
+        'div',
+        { class: 'table-scroll' },
+        h(
+          'table',
+          { class: 'stat-table heat' },
+          h('thead', {}, h('tr', {}, h('th', {}, ''), maps.map((m) => h('th', { title: m.name }, shortName(m))))),
+          h(
+            'tbody',
+            {},
+            agents.map(({ a }) =>
+              h(
+                'tr',
+                {},
+                h('th', {}, h('img', { class: 'agent-mini', src: a.icon, alt: a.name, title: a.name })),
+                maps.map((m) => {
+                  const n = cell(a.id, m.id);
+                  return h('td', { class: n ? 'tap' : 'zero', style: heat(n, cellMax), onClick: n ? () => open({ mapId: m.id, agentId: a.id }) : null }, n || '');
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  render();
+  const unsub = store.watchAllLineups(
+    groupId,
+    (list) => {
+      lineups = list;
+      render();
+    },
+    showError,
+  );
+  return unsub;
+}
+
 // ---- ルーター（URL の # 以降で画面を切り替える） ----
 
 const G = '#\\/g\\/([\\w-]+)';
@@ -1909,6 +2106,7 @@ const groupRoutes = [
   [new RegExp(`^${G}\\/new(?:\\/([a-z0-9]+)\\/(atk|def)(?:\\/([a-z0-9]+))?)?$`), (m) => [editorView, { mapId: m[2], side: m[3], agentId: m[4] }]],
   [new RegExp(`^${G}\\/edit\\/([\\w-]+)$`), (m) => [editorView, { id: m[2] }]],
   [new RegExp(`^${G}\\/settings$`), () => [groupSettingsView, {}]],
+  [new RegExp(`^${G}\\/stats$`), () => [statsView, {}]],
 ];
 
 let unmount = null;

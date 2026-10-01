@@ -148,6 +148,11 @@ export function watchLineups(groupId, mapId, cb, onError) {
   );
 }
 
+// グループの全マップの定点（集計用。画像は別ドキュメントなので軽い）
+export function watchAllLineups(groupId, cb, onError) {
+  return onSnapshot(lineupsCol(groupId), (snap) => cb(snap.docs.map(withId)), onError);
+}
+
 export async function getLineup(groupId, id) {
   const snap = await getDoc(lineupRef(groupId, id));
   return snap.exists() ? withId(snap) : null;

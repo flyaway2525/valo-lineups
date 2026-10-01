@@ -2091,3 +2091,227 @@ a {
 .map-grid.others .map-tile {
   opacity: 0.7;
 }
+
+/* ---- 定点の集計 ---- */
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: calc(24px + var(--safe-bottom));
+}
+
+.stats-side {
+  align-self: flex-start;
+}
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.stat-card strong {
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.stat-card span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.stat-card.ok strong {
+  color: var(--from);
+}
+
+.stat-card.check strong {
+  color: var(--gold);
+}
+
+.stat-card.muted strong {
+  color: var(--muted);
+}
+
+.stats-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.stats-legend .dot {
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+}
+
+.dot.ok {
+  background: var(--from);
+}
+
+.dot.check {
+  background: var(--gold);
+}
+
+.stats .section-label {
+  margin: 10px 0 0;
+}
+
+.stat-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 4px;
+  font-size: 13px;
+}
+
+.stat-table th,
+.stat-table td {
+  padding: 6px 6px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.stat-table thead th {
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.stat-table tbody th {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.stat-table tbody tr > * {
+  background: var(--surface);
+}
+
+.stat-table tbody tr > :first-child {
+  border-radius: 10px 0 0 10px;
+}
+
+.stat-table tbody tr > :last-child {
+  border-radius: 0 10px 10px 0;
+}
+
+.stat-table tr.off-pool th {
+  color: var(--muted);
+}
+
+.tap {
+  cursor: pointer;
+}
+
+.stat-table .num {
+  display: inline-block;
+  min-width: 2ch;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 有効（緑）と要確認（黄）の割合 */
+.stat-bar {
+  display: flex;
+  height: 6px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+
+.stat-bar .ok {
+  background: var(--from);
+}
+
+.stat-bar .check {
+  background: var(--gold);
+}
+
+.stat-table .agent-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat-table .agent-cell img {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+.stat-table.agents .bar-col {
+  width: 100%;
+}
+
+.bar-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bar-line .stat-bar {
+  margin-top: 0;
+}
+
+.stat-table .sub {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.stat-table .slot {
+  width: 26px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-table td.slot.zero {
+  color: var(--border);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.stat-table.heat td,
+.stat-table.heat thead th {
+  min-width: 34px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-table.heat td {
+  font-weight: 700;
+}
+
+.stat-table.heat tbody th {
+  padding: 3px 6px;
+}
+
+.agent-mini {
+  display: block;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+/* 地図画面のグループ名は押せる（集計・設定・一覧） */
+button.group-label {
+  cursor: pointer;
+}
