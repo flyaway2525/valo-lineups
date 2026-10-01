@@ -135,8 +135,9 @@ service cloud.firestore {
               'map', 'side', 'agent', 'ability', 'site', 'from', 'to',
               'title', 'notes', 'throwType', 'importance', 'videoUrl', 'imageIds',
               'createdBy', 'createdByName', 'createdAt', 'updatedBy', 'updatedByName', 'updatedAt',
-              'status', 'statusNote', 'statusBy', 'statusByName', 'statusAt'])
+              'status', 'statusNote', 'statusBy', 'statusByName', 'statusAt', 'anyFrom'])
             && isValidStatus(d)
+            && (!('anyFrom' in d) || d.anyFrom is bool)
             && isNonEmptyString(d.map, 32)
             && d.side in ['atk', 'def']
             && isNonEmptyString(d.agent, 32)

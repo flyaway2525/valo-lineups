@@ -2325,3 +2325,23 @@ button.group-label {
 .status-note.ai {
   color: #9fd3ff;
 }
+
+/* 立ち位置なし（スモークなどマップから置く）の着弾点：周りに点線の輪 */
+.marker.target.placed::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border: 2px dashed rgb(236 232 225 / 0.75);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.any-from {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--muted);
+}

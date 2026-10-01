@@ -821,7 +821,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
         x: c.x,
         y: c.y,
         icon: agentId ? valo.abilityOf(l.agent, l.ability)?.icon : valo.agentById(l.agent)?.icon,
-        kind: `target st-${clusterStatus(c)}${agentId ? '' : ' agent'}${selected === c ? ' selected' : ''}${c.items.some((i) => i.importance === 'essential') ? ' essential' : ''}`,
+        kind: `target st-${clusterStatus(c)}${agentId ? '' : ' agent'}${selected === c ? ' selected' : ''}${c.items.some((i) => i.importance === 'essential') ? ' essential' : ''}${c.items.every(valo.noFrom) ? ' placed' : ''}`,
         badge: c.items.length > 1 ? c.items.length : null,
         label: c.items.map((i) => i.title).join(' / '),
         onClick: () => {
@@ -843,6 +843,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     for (const c of clusters) {
       const state = !selected ? '' : selected === c ? ' selected' : ' dim';
       for (const l of c.items) {
+        if (valo.noFrom(l)) continue; // 立ち位置なし：着弾点（置く場所）だけ
         lines.push({ from: l.from, to: l.to, kind: `st-${valo.statusOf(l)}${state}` });
         fromMarkers.push({
           x: l.from.x,
@@ -1082,7 +1083,8 @@ function openLightbox(src) {
 
 function imageCarousel(groupId, l) {
   const ids = l.imageIds ?? [];
-  const slots = valo.IMAGE_LABELS.map((label, i) => ({ label, id: ids[i] })).filter((s) => s.id);
+  const labels = valo.imageLabels(l);
+  const slots = labels.map((label, i) => ({ label, id: ids[i] })).filter((s) => s.id);
   if (!slots.length) return null;
 
   const figs = slots.map(({ label, id }) => {
@@ -1103,7 +1105,7 @@ function imageCarousel(groupId, l) {
   // 何枚目を見ているか（ボタン・ホイール・矢印・スワイプのどれで動かしても合わせる）
   let index = 0;
   const steps = slots.map(({ label }, i) =>
-    h('button', { type: 'button', class: `shot-step${i === 0 ? ' active' : ''}`, onClick: () => show(i) }, `${valo.IMAGE_LABELS.indexOf(label) + 1} ${label}`),
+    h('button', { type: 'button', class: `shot-step${i === 0 ? ' active' : ''}`, onClick: () => show(i) }, `${labels.indexOf(label) + 1} ${label}`),
   );
   const prev = h('button', { type: 'button', class: 'shot-arrow prev', 'aria-label': '前の画像', onClick: () => show(index - 1) }, '‹');
   const next = h('button', { type: 'button', class: 'shot-arrow next', 'aria-label': '次の画像', onClick: () => show(index + 1) }, '›');
@@ -1412,12 +1414,13 @@ function buildEditor(body, groupId, orig, defaults) {
     throwType: orig?.throwType ?? 'normal',
     importance: orig?.importance ?? 'useful',
     videoUrl: orig?.videoUrl ?? '',
+    anyFrom: orig?.anyFrom === true,
   };
   const touch = matchMedia('(pointer: coarse)').matches; // スマホ・タブレット
   // 画像の 3 枠：{ id } = 保存済み、{ data, w, h } = 新しく追加、null = 空
   const slots =[0, 1, 2].map((i) => (orig?.imageIds?.[i] ? { id: orig.imageIds[i] } : null));
   let activeSlot = slots.findIndex((s) => !s);
-  let placing = f.from ? (f.to ? null : 'to') : 'from';
+  let placing = f.anyFrom ? (f.to ? null : 'to') : f.from ? (f.to ? null : 'to') : 'from';
   let titleTouched = !!orig;
   let siteTouched = !!orig;
   let saving = false;
@@ -1534,22 +1537,41 @@ function buildEditor(body, groupId, orig, defaults) {
   function renderPlacing() {
     const map = valo.mapById(f.map);
     mv.setMap(map);
+    if (f.anyFrom && placing === 'from') placing = 'to';
     setChildren(
       placeBtns,
-      [
-        ['from', '① 立ち位置'],
-        ['to', '② 着弾点'],
-      ].map(([k, label]) =>
+      (f.anyFrom
+        ? [['to', '置く場所']]
+        : [
+            ['from', '① 立ち位置'],
+            ['to', '② 着弾点'],
+          ]
+      ).map(([k, label]) =>
         h('button', { class: `${placing === k ? 'active' : ''}${f[k] ? ' done' : ''}`, onClick: () => ((placing = k), renderPlacing()) }, `${f[k] ? '✓ ' : ''}${label}`),
+      ),
+      h(
+        'label',
+        { class: 'any-from' },
+        h('input', {
+          type: 'checkbox',
+          checked: f.anyFrom,
+          onChange: (e) => {
+            f.anyFrom = e.target.checked;
+            placing = f.anyFrom ? (f.to ? null : 'to') : f.from ? null : 'from';
+            renderAll();
+          },
+        }),
+        '立ち位置なし',
       ),
     );
     const agent = valo.agentById(f.agent);
     const markers = [];
-    if (f.from) markers.push({ ...f.from, kind: 'from', icon: agent?.icon, label: '立ち位置' });
-    if (f.to) markers.push({ ...f.to, kind: 'target selected', icon: valo.abilityOf(f.agent, f.ability)?.icon, label: '着弾点' });
-    mv.render({ markers, lines: f.from && f.to ? [{ from: f.from, to: f.to, kind: 'selected' }] : [] });
-    mapHint.textContent =
-      placing === 'from'
+    if (f.from && !f.anyFrom) markers.push({ ...f.from, kind: 'from', icon: agent?.icon, label: '立ち位置' });
+    if (f.to) markers.push({ ...f.to, kind: `target selected${f.anyFrom ? ' placed' : ''}`, icon: valo.abilityOf(f.agent, f.ability)?.icon, label: f.anyFrom ? '置く場所' : '着弾点' });
+    mv.render({ markers, lines: f.from && f.to && !f.anyFrom ? [{ from: f.from, to: f.to, kind: 'selected' }] : [] });
+    mapHint.textContent = f.anyFrom
+      ? 'スモークなど、どこからでも置けるスキルです。置く場所だけタップしてください。'
+      : placing === 'from'
         ? '地図をタップ（クリック）して立ち位置を置いてください。ホイール・ピンチで拡大できます。'
         : placing === 'to'
           ? '次に着弾点を置いてください。'
@@ -1592,6 +1614,7 @@ function buildEditor(body, groupId, orig, defaults) {
             class: `ability-choice${ab.slot === f.ability ? ' active' : ''}`,
             onClick: () => {
               f.ability = ab.slot;
+              if (!orig) f.anyFrom = valo.isPlacedAbility(f.agent, ab.slot);
               autoFill();
               renderAll();
             },
@@ -1644,7 +1667,7 @@ function buildEditor(body, groupId, orig, defaults) {
   function renderShots() {
     setChildren(
       shotsBox,
-      valo.IMAGE_LABELS.map((label, i) => {
+      valo.imageLabels(f).map((label, i) => {
         const slot = slots[i];
         const box = h(
           'div',
@@ -1715,7 +1738,7 @@ function buildEditor(body, groupId, orig, defaults) {
       const next = slots.findIndex((s) => !s);
       activeSlot = next >= 0 ? next : i;
       renderShots();
-      toast(`${valo.IMAGE_LABELS[i]}の画像を追加しました（${Math.round((img.data.length * 0.75) / 1024)}KB）`);
+      toast(`${valo.imageLabels(f)[i]}の画像を追加しました（${Math.round((img.data.length * 0.75) / 1024)}KB）`);
     } catch (e) {
       showError(e);
     }
@@ -1736,8 +1759,8 @@ function buildEditor(body, groupId, orig, defaults) {
     const problems = [
       !f.agent && 'エージェント',
       !f.ability && 'アビリティ',
-      !f.from && '立ち位置',
-      !f.to && '着弾点',
+      !f.anyFrom && !f.from && '立ち位置',
+      !f.to && (f.anyFrom ? '置く場所' : '着弾点'),
       !title && 'タイトル',
     ].filter(Boolean);
     if (problems.length) return toast(`${problems.join('・')}を入力してください`);
@@ -1755,8 +1778,10 @@ function buildEditor(body, groupId, orig, defaults) {
         agent: f.agent,
         ability: f.ability,
         site: f.site,
-        from: f.from,
+        // 立ち位置なしでも from は必須項目なので、置く場所と同じ点を入れておく
+        from: f.anyFrom ? f.to : f.from,
         to: f.to,
+        anyFrom: f.anyFrom,
         title,
         notes: f.notes.trim(),
         throwType: f.throwType,

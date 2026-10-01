@@ -38,6 +38,23 @@ export const THROW_TYPES = [
 ];
 
 export const IMAGE_LABELS = ['立ち位置', '照準', '着弾'];
+// 立ち位置なし（スモークなどマップから置くスキル）の定点の画像 3 枠
+export const PLACED_IMAGE_LABELS = ['置く画面', '外から見た様子', '補足'];
+
+// マップを開いて置くスキル。新しく登録するとき「立ち位置なし」を最初からオンにする
+const PLACED = { brimstone: ['Ability2'], omen: ['Ability2'], astra: ['Grenade', 'Ability1', 'Ability2'], clove: ['Ability2'] };
+export function isPlacedAbility(agentId, slot) {
+  return !!PLACED[agentId]?.includes(slot);
+}
+
+// 立ち位置なし（どこからでも置ける）定点か
+export function noFrom(lineup) {
+  return lineup.anyFrom === true;
+}
+
+export function imageLabels(lineup) {
+  return noFrom(lineup) ? PLACED_IMAGE_LABELS : IMAGE_LABELS;
+}
 
 // コンペのマップローテーション（API で取れないので手で更新する）
 // 更新日：2026-09-30、パッチ 13.04（V26 Act 5）
