@@ -489,6 +489,12 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   }
 
   // ---- 上部 ----
+  // スマホではパネルのエージェント一覧の代わりに、マップ名の横のボタンから選ぶ
+  const agentPicker = h('button', {
+    class: 'agent-picker',
+    'aria-label': 'エージェントを選ぶ',
+    onClick: () => pickAgent(agentCounts(), agentId).then((r) => r && go({ agentId: r === 'all' ? null : r })),
+  });
   const groupName = h('span', {});
   const groupLabel = h('span', { class: 'group-label' }, groupName);
   const topbar = h(
@@ -500,10 +506,15 @@ function mapView(root, { groupId, mapId, side, agentId }) {
       { class: 'map-title' },
       groupLabel,
       h(
-        'button',
-        { class: 'map-picker', onClick: () => pickMap(mapId).then((id) => id && go({ mapId: id })) },
-        h('span', { class: 'map-picker-name' }, map.name),
-        h('span', { class: 'caret' }, '▾'),
+        'div',
+        { class: 'map-title-row' },
+        h(
+          'button',
+          { class: 'map-picker', onClick: () => pickMap(mapId).then((id) => id && go({ mapId: id })) },
+          h('span', { class: 'map-picker-name' }, map.name),
+          h('span', { class: 'caret' }, '▾'),
+        ),
+        agentPicker,
       ),
     ),
     h(
@@ -574,9 +585,21 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     shortcutRow.hidden = !mine.length && !agentId;
   }
 
-  function renderAgents() {
+  function agentCounts() {
     const counts = {};
     for (const l of lineups) if (l.side === side && statusShown(l)) counts[l.agent] = (counts[l.agent] ?? 0) + 1;
+    return counts;
+  }
+
+  function renderAgents() {
+    const counts = agentCounts();
+    const cur = agentId && valo.agentById(agentId);
+    setChildren(
+      agentPicker,
+      cur ? h('img', { src: cur.icon, alt: '' }) : h('span', { class: 'agent-picker-all' }, '全'),
+      h('span', { class: 'agent-picker-name' }, cur ? cur.name : 'すべて'),
+      h('span', { class: 'caret' }, '▾'),
+    );
     setChildren(
       agentStrip,
       master.agents.map((a) =>
@@ -989,6 +1012,29 @@ function pickMap(currentId) {
     h('div', { class: 'map-grid' }, pool.map((m) => tile(m, close))),
     others.length ? h('p', { class: 'map-group-label muted' }, 'ローテーション外') : null,
     others.length ? h('div', { class: 'map-grid others' }, others.map((m) => tile(m, close))) : null,
+    h('button', { class: 'sheet-action cancel', onClick: () => close(null) }, 'キャンセル'),
+  ]);
+}
+
+// エージェントを選ぶシート。'all' は「すべて」、閉じただけなら null
+function pickAgent(counts, currentId) {
+  const tile = (a, close) =>
+    h(
+      'button',
+      { class: `agent-btn${a.id === currentId ? ' active' : ''}${counts[a.id] ? '' : ' none'}`, onClick: () => close(a.id) },
+      h('img', { src: a.icon, alt: '', draggable: 'false' }),
+      h('span', { class: 'agent-name' }, a.name),
+      counts[a.id] ? h('span', { class: 'count' }, counts[a.id]) : null,
+    );
+  const withLineups = master.agents.filter((a) => counts[a.id]);
+  const others = master.agents.filter((a) => !counts[a.id]);
+  return openSheet((close) => [
+    h('div', { class: 'sheet-title' }, 'エージェントを選ぶ'),
+    h('button', { class: `sheet-action${currentId ? '' : ' active'}`, onClick: () => close('all') }, 'すべてのエージェント'),
+    withLineups.length ? h('p', { class: 'map-group-label' }, `定点あり（${withLineups.length}）`) : null,
+    h('div', { class: 'agent-grid' }, withLineups.map((a) => tile(a, close))),
+    others.length ? h('p', { class: 'map-group-label muted' }, '定点なし') : null,
+    others.length ? h('div', { class: 'agent-grid' }, others.map((a) => tile(a, close))) : null,
     h('button', { class: 'sheet-action cancel', onClick: () => close(null) }, 'キャンセル'),
   ]);
 }

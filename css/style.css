@@ -686,6 +686,87 @@ a {
   color: var(--accent);
 }
 
+/* マップ名とエージェント選択を横に並べる */
+.map-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-picker {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 50%;
+  padding: 2px 8px 2px 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.agent-picker img,
+.agent-picker-all {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--bg);
+}
+
+.agent-picker-all {
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.agent-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  gap: 10px 6px;
+  justify-items: center;
+  margin-bottom: 12px;
+}
+
+.agent-grid .agent-btn {
+  width: 60px;
+}
+
+.agent-grid .agent-name {
+  max-width: 60px;
+}
+
+/* パネルが縦に詰まっても中身を押しつぶさない */
+.panel > * {
+  flex-shrink: 0;
+}
+
+/* スマホ：エージェント一覧はヘッダーのボタンから選ぶ。名前は省いてアイコンだけ */
+@media (max-width: 899px) {
+  .panel .agent-strip {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .agent-picker-name {
+    display: none;
+  }
+
+  .agent-picker {
+    padding-right: 6px;
+  }
+}
+
 .map-picker-name {
   overflow: hidden;
   text-overflow: ellipsis;
