@@ -2468,3 +2468,9 @@ button.group-label {
   z-index: 10;
   transform: translate(-50%, -50%) scale(calc(1.25 / var(--s)));
 }
+
+/* 設置（トラップワイヤーなど）：始点と終点を実線でつなぐ */
+.map-line.wire {
+  stroke-dasharray: none;
+  stroke-width: 3;
+}

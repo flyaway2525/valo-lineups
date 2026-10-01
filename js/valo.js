@@ -38,27 +38,53 @@ export const THROW_TYPES = [
 ];
 
 export const IMAGE_LABELS = ['立ち位置', '照準', '着弾'];
-// 立ち位置なし（スモークなどマップから置くスキル）の定点の画像 3 枠
-export const PLACED_IMAGE_LABELS = ['置く画面', '外から見た様子', '補足'];
 
-// マップを開いて置くスキル。新しく登録するとき「立ち位置なし」を最初からオンにする
-const PLACED = { brimstone: ['Ability2'], omen: ['Ability2'], astra: ['Grenade', 'Ability1', 'Ability2'], clove: ['Ability2'] };
+// 定点の種類。スキルによって、マップに置く点・画像の枠の名前が変わる
+//   throw  投げる（ふつうの定点）：立ち位置 → 着弾点
+//   placed 置く（スモークなど、どこからでもマップで置ける）：置く場所だけ
+//   setup  設置（トラップワイヤーなど）：始点 → 終点（設置したものそのもの）
+export const MODES = [
+  { id: 'throw', label: '投げる', from: '立ち位置', to: '着弾点', images: ['立ち位置', '照準', '着弾'] },
+  { id: 'placed', label: '置く（立ち位置なし）', from: null, to: '置く場所', images: ['置く画面', '外から見た様子', '補足'] },
+  { id: 'setup', label: '設置（ワイヤーなど）', from: '始点', to: '終点', images: ['始点', '全体像', '引っかかった時'] },
+];
+export const PLACED_IMAGE_LABELS = MODES[1].images;
+
+// 新しく登録するとき、スキルに合わせて最初に選んでおく種類
+const DEFAULT_MODES = {
+  brimstone: { Ability2: 'placed' },
+  omen: { Ability2: 'placed' },
+  astra: { Grenade: 'placed', Ability1: 'placed', Ability2: 'placed' },
+  clove: { Ability2: 'placed' },
+  cypher: { Grenade: 'setup' },
+  deadlock: { Grenade: 'setup' },
+};
+export function defaultMode(agentId, slot) {
+  return DEFAULT_MODES[agentId]?.[slot] ?? 'throw';
+}
 export function isPlacedAbility(agentId, slot) {
-  return !!PLACED[agentId]?.includes(slot);
+  return defaultMode(agentId, slot) === 'placed';
+}
+
+export function modeOf(lineup) {
+  return lineup.mode ?? (lineup.anyFrom === true ? 'placed' : 'throw');
+}
+export function modeInfo(lineup) {
+  return MODES.find((m) => m.id === modeOf(lineup)) ?? MODES[0];
 }
 
 // 立ち位置なし（どこからでも置ける）定点か
 export function noFrom(lineup) {
-  return lineup.anyFrom === true;
+  return modeOf(lineup) === 'placed';
 }
 
 // メモを「概要（上）／画像ごとの説明／備考（下）」に分ける。
 // 「立ち位置 : …」「照準 : …」「着弾 : …」の行は対応する画像の下に出す。
 // それより前の行は概要、後の行（「備考 :」も含む）は備考
 const CAPTION_KEYS = [
-  ['立ち位置', '置く画面'],
-  ['照準', '外から見た様子', '置く場所'],
-  ['着弾', '効果', '補足'],
+  ['立ち位置', '置く画面', '始点'],
+  ['照準', '外から見た様子', '置く場所', '全体像'],
+  ['着弾', '効果', '補足', '引っかかった時'],
 ];
 export function splitNotes(lineup) {
   const caps = [[], [], []];
@@ -83,7 +109,7 @@ export function splitNotes(lineup) {
 }
 
 export function imageLabels(lineup) {
-  return noFrom(lineup) ? PLACED_IMAGE_LABELS : IMAGE_LABELS;
+  return modeInfo(lineup).images;
 }
 
 // コンペのマップローテーション（API で取れないので手で更新する）
