@@ -745,7 +745,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   // 状態の絞り込みで隠れている定点があれば、その案内
   function hiddenHint() {
     const hidden = lineups.filter((l) => l.side === side && (!agentId || l.agent === agentId) && !shownStatuses.has(valo.statusOf(l))).length;
-    return hidden ? `表示中の状態の定点はありません（ほかに ${hidden} 件）。下の「要確認」などを押すと表示されます。` : '';
+    return hidden ? `表示中の状態の定点はありません（ほかに ${hidden} 件）。上の「要確認」などを押すと表示されます。` : '';
   }
 
   function renderStatus() {
