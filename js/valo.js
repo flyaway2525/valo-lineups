@@ -5,7 +5,7 @@
 // コールアウト（「A メイン」など）はゲーム内座標なので、マップごとの係数でミニマップ座標に変換する。
 
 const API = 'https://valorant-api.com/v1';
-const CACHE_KEY = 'valo-master-v1';
+const CACHE_KEY = 'valo-master-v2';
 const TTL = 24 * 60 * 60 * 1000;
 
 // アビリティの枠とキーの対応（C / Q / E / X の順に並べる）
