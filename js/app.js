@@ -470,9 +470,10 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   let source = sessionStorage.getItem('source') ?? 'all';
   if (!SOURCES.some((s) => s.id === source)) source = 'all';
   const shownSlots = new Set(); // 選んだアビリティだけ表示（空 = 全部）
-  // 表示する状態（有効 / 要確認 / 無効）。最初は無効だけ隠す
-  const DEFAULT_STATUSES = ['ok', 'ai', 'check'];
-  const shownStatuses = new Set(JSON.parse(sessionStorage.getItem('statuses2') ?? 'null') ?? DEFAULT_STATUSES);
+  // 表示する状態（有効 / AI確認済み / 要確認 / 無効）。最初は人が確認した「有効」だけ
+  const DEFAULT_STATUSES = ['ok'];
+  const STATUS_KEY = 'statuses3';
+  const shownStatuses = new Set(JSON.parse(sessionStorage.getItem(STATUS_KEY) ?? 'null') ?? DEFAULT_STATUSES);
   // 見直しモード：このマップの要確認の定点を、攻守・エージェントに関係なく一覧にする
   let reviewing = false;
   let selected = null; // 選んでいる着弾点のクラスター
@@ -725,7 +726,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
   }
 
   function saveStatuses() {
-    sessionStorage.setItem('statuses', JSON.stringify([...shownStatuses]));
+    sessionStorage.setItem(STATUS_KEY, JSON.stringify([...shownStatuses]));
   }
 
   // 状態ボタン：押すたびに表示 / 非表示（全部は隠せない）
@@ -739,6 +740,12 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     saveStatuses();
     selected = null;
     render();
+  }
+
+  // 状態の絞り込みで隠れている定点があれば、その案内
+  function hiddenHint() {
+    const hidden = lineups.filter((l) => l.side === side && (!agentId || l.agent === agentId) && !shownStatuses.has(valo.statusOf(l))).length;
+    return hidden ? `表示中の状態の定点はありません（ほかに ${hidden} 件）。下の「要確認」などを押すと表示されます。` : '';
   }
 
   function renderStatus() {
@@ -960,7 +967,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
               ? `${list.length} 件。着弾点・立ち位置・軌道の線をタップで選択、もう一度タップで詳細が出ます。`
               : `${list.length} 件。エージェントを選ぶか、地図のアイコンをタップしてください。`
             : agentId
-              ? 'この条件の定点はまだありません。右上の ＋ から登録できます。'
+              ? hiddenHint() || 'この条件の定点はまだありません。右上の ＋ から登録できます。'
               : lineups.length
                 ? 'エージェントを選んでください。'
                 : 'このマップの定点はまだありません。右上の ＋ から登録できます。',
@@ -977,7 +984,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
     const order = [...map.sites, 'mid', ''];
     setChildren(
       listBox,
-      list.length ? null : h('p', { class: 'list-hint' }, 'この条件の定点はまだありません。'),
+      list.length ? null : h('p', { class: 'list-hint' }, hiddenHint() || 'この条件の定点はまだありません。'),
       [...bySite.entries()]
         .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
         .map(([site, items]) => [h('p', { class: 'list-label' }, valo.siteLabel(site) || 'その他'), items.map(lineupCard)]),
