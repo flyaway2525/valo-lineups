@@ -27,15 +27,121 @@ export const IMPORTANCE = [
   { id: 'niche', label: 'ネタ' },
 ];
 
-export const THROW_TYPES = [
-  { id: 'normal', label: '通常' },
-  { id: 'jump', label: 'ジャンプ投げ' },
-  { id: 'run', label: '走り投げ' },
-  { id: 'crouch', label: 'しゃがみ投げ' },
-  { id: 'runjump', label: '走りジャンプ投げ' },
-  { id: 'alt', label: '右クリック（下投げ）' },
-  { id: 'other', label: 'その他（メモ参照）' },
+// 投げ方は「使い方（アビリティごとに違う）」×「動き（共通）」の組み合わせ。
+// 使い方は throwType、動きは throwMove に入れる
+const ACTIONS = {
+  throw: '投げ（左クリック）',
+  lob: '下投げ（右クリック）',
+  toss: '投げる',
+  place: '設置',
+  through: '壁越しに設置（右クリック）',
+  launch: '発射',
+  bounce: 'バウンド付き（右クリック）',
+  send: '前に送り出す',
+  steer: '曲げる（長押しで誘導）',
+  hold: '長押しで距離調整',
+  drop: '途中で落とす（再使用）',
+  prepare: '構えて誘導（右クリック→再使用）',
+  curveL: '左カーブ（左クリック）',
+  curveR: '右カーブ（右クリック）',
+  b0: 'バウンドなし',
+  b1: '1 バウンド',
+  b2: '2 バウンド',
+  map: 'マップで指定',
+  view: '視点で置く（距離調整）',
+  tp: 'テレポート先を指定',
+  plant: '設置・解除させる（右クリック）',
+  marker: 'その場にマーカー（右クリック）',
+  slow: '遅い壁（右クリック）',
+  dash2: '2 回ダッシュ（左クリック）',
+  dash1: '1 回ダッシュ（右クリック）',
+  shoot: '撃つ',
+  instant: 'その場で発動',
+  other: 'その他（メモ参照）',
+};
+
+export const MOVES = [
+  { id: 'stand', label: '止まって' },
+  { id: 'jump', label: 'ジャンプ' },
+  { id: 'run', label: '走り' },
+  { id: 'runjump', label: '走りジャンプ' },
+  { id: 'walk', label: '歩き' },
+  { id: 'crouch', label: 'しゃがみ' },
+  { id: 'crouchjump', label: 'しゃがみジャンプ' },
 ];
+
+// エージェント → スキル → 使い方（先頭がいちばんよく使うもの）。「その他」はどれにも付く
+const ABILITY_ACTIONS = {
+  astra: { Grenade: ['map'], Ability1: ['map'], Ability2: ['map'], Ultimate: ['map'] },
+  breach: { Grenade: ['send'], Ability1: ['send'], Ability2: ['hold'], Ultimate: ['send'] },
+  brimstone: { Grenade: ['toss'], Ability1: ['launch'], Ability2: ['map'], Ultimate: ['map'] },
+  chamber: { Grenade: ['place'], Ability1: ['shoot'], Ability2: ['place'], Ultimate: ['shoot'] },
+  clove: { Grenade: ['instant'], Ability1: ['throw'], Ability2: ['map'], Ultimate: ['instant'] },
+  cypher: { Grenade: ['place'], Ability1: ['toss'], Ability2: ['place'], Ultimate: ['instant'] },
+  deadlock: { Grenade: ['throw'], Ability1: ['place'], Ability2: ['throw', 'lob'], Ultimate: ['launch'] },
+  fade: { Grenade: ['send', 'steer'], Ability1: ['throw', 'drop'], Ability2: ['throw', 'drop'], Ultimate: ['send'] },
+  gekko: { Grenade: ['throw', 'lob'], Ability1: ['send', 'plant'], Ability2: ['throw'], Ultimate: ['steer'] },
+  harbor: { Grenade: ['throw'], Ability1: ['send', 'steer'], Ability2: ['view'], Ultimate: ['send'] },
+  hush: { Grenade: ['instant'], Ability1: ['throw', 'prepare'], Ability2: ['throw', 'prepare'], Ultimate: ['steer'] },
+  iso: { Grenade: ['send', 'slow'], Ability1: ['send'], Ability2: ['instant'], Ultimate: ['send'] },
+  jett: { Grenade: ['toss', 'steer'], Ability1: ['instant'], Ability2: ['instant'], Ultimate: ['shoot'] },
+  kayo: { Grenade: ['throw', 'lob'], Ability1: ['throw', 'lob'], Ability2: ['throw'], Ultimate: ['instant'] },
+  killjoy: { Grenade: ['throw', 'lob'], Ability1: ['place'], Ability2: ['place'], Ultimate: ['place'] },
+  miks: { Grenade: ['throw'], Ability1: ['instant'], Ability2: ['map'], Ultimate: ['send'] },
+  neon: { Grenade: ['send'], Ability1: ['toss'], Ability2: ['instant'], Ultimate: ['shoot'] },
+  omen: { Grenade: ['tp'], Ability1: ['send'], Ability2: ['view'], Ultimate: ['map'] },
+  phoenix: { Grenade: ['send', 'steer'], Ability1: ['throw', 'lob'], Ability2: ['curveL', 'curveR'], Ultimate: ['instant'] },
+  raze: { Grenade: ['send'], Ability1: ['toss'], Ability2: ['throw', 'lob'], Ultimate: ['launch'] },
+  reyna: { Grenade: ['send'], Ability1: ['instant'], Ability2: ['instant'], Ultimate: ['instant'] },
+  sage: { Grenade: ['place'], Ability1: ['throw'], Ability2: ['instant'], Ultimate: ['instant'] },
+  skye: { Grenade: ['instant'], Ability1: ['steer'], Ability2: ['send', 'steer'], Ultimate: ['send'] },
+  sova: { Grenade: ['steer'], Ability1: ['b0', 'b1', 'b2'], Ability2: ['b0', 'b1', 'b2'], Ultimate: ['shoot'] },
+  tejo: { Grenade: ['steer'], Ability1: ['launch', 'bounce'], Ability2: ['map'], Ultimate: ['map'] },
+  veto: { Grenade: ['place'], Ability1: ['throw'], Ability2: ['place'], Ultimate: ['instant'] },
+  viper: { Grenade: ['launch'], Ability1: ['throw', 'lob'], Ability2: ['send'], Ultimate: ['instant'] },
+  vyse: { Grenade: ['throw'], Ability1: ['place'], Ability2: ['place', 'through'], Ultimate: ['place'] },
+  waylay: { Grenade: ['throw'], Ability1: ['dash2', 'dash1'], Ability2: ['instant'], Ultimate: ['send'] },
+  yoru: { Grenade: ['send', 'marker'], Ability1: ['throw'], Ability2: ['send', 'place'], Ultimate: ['instant'] },
+};
+// 一覧にない新しいエージェント用
+const FALLBACK_ACTIONS = ['throw', 'lob', 'place'];
+
+// マップで指定するスキルは動きが関係ない
+const NO_MOVE = ['map', 'view', 'tp'];
+
+export function throwActions(agentId, slot) {
+  const ids = ABILITY_ACTIONS[agentId]?.[slot] ?? FALLBACK_ACTIONS;
+  return [...ids, 'other'].map((id) => ({ id, label: ACTIONS[id] }));
+}
+
+export function hasMove(action) {
+  return !NO_MOVE.includes(action);
+}
+
+// 古い throwType（通常・ジャンプ投げ・右クリック など 1 つで持っていたもの）も読めるようにする
+const OLD_MOVES = ['jump', 'run', 'crouch', 'runjump'];
+export function throwActionOf(l) {
+  const list = throwActions(l.agent, l.ability).map((a) => a.id);
+  const t = l.throwType;
+  if (list.includes(t)) return t;
+  if (t === 'alt') return list.includes('lob') ? 'lob' : 'other';
+  if (t === 'other') return 'other';
+  return list[0];
+}
+export function throwMoveOf(l) {
+  if (l.throwMove) return l.throwMove;
+  return OLD_MOVES.includes(l.throwType) ? l.throwType : 'stand';
+}
+
+// 「ジャンプ・下投げ（右クリック）」のような表示。投げ方が入っていない定点は空
+export function throwLabel(l) {
+  if (!l.throwType) return '';
+  const action = throwActionOf(l);
+  const move = throwMoveOf(l);
+  const a = ACTIONS[action];
+  if (!hasMove(action) || move === 'stand') return a;
+  return `${label(MOVES, move)}・${a}`;
+}
 
 export const IMAGE_LABELS = ['立ち位置', '照準', '着弾'];
 

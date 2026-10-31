@@ -103,7 +103,8 @@ groups/{groupId}
   │    ├─ site                   A / B / C / mid / null
   │    ├─ from: {x, y}, to: {x, y}   立ち位置・着弾点（ミニマップ上の 0〜1）
   │    ├─ title, notes
-  │    ├─ throwType              normal / jump / run / crouch / runjump / alt / other
+  │    ├─ throwType              使い方（アビリティごと：throw 左クリック / lob 右クリック / place 設置 / b1 1バウンド など。js/valo.js の ABILITY_ACTIONS）
+  │    ├─ throwMove              動き（stand / jump / run / runjump / walk / crouch / crouchjump）
   │    ├─ importance             essential / useful / niche
   │    ├─ videoUrl               https のリンク（任意）
   │    ├─ imageIds: [立ち位置, 照準, 着弾]   空き枠は null

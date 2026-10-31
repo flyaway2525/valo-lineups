@@ -909,7 +909,7 @@ function mapView(root, { groupId, mapId, side, agentId }) {
           [
             reviewing ? `${valo.agentById(l.agent)?.name ?? ''} ${valo.label(valo.SIDES, l.side)}` : null,
             valo.siteLabel(l.site),
-            valo.label(valo.THROW_TYPES, l.throwType),
+            valo.throwLabel(l),
             l.createdByName,
           ]
             .filter(Boolean)
@@ -1308,7 +1308,7 @@ function openDetail(groupId, l) {
         'div',
         { class: 'badges' },
         h('span', { class: `imp imp-${l.importance}` }, valo.label(valo.IMPORTANCE, l.importance)),
-        l.throwType ? h('span', { class: 'badge' }, valo.label(valo.THROW_TYPES, l.throwType)) : null,
+        valo.throwLabel(l) ? h('span', { class: 'badge' }, valo.throwLabel(l)) : null,
         h('span', { class: 'badge muted' }, byLine),
       ),
       statusBox(groupId, l),
@@ -1453,7 +1453,8 @@ function buildEditor(body, groupId, orig, defaults) {
     to: orig?.to ?? null,
     title: orig?.title ?? '',
     notes: orig?.notes ?? '',
-    throwType: orig?.throwType ?? 'normal',
+    throwType: orig ? valo.throwActionOf(orig) : null,
+    throwMove: orig ? valo.throwMoveOf(orig) : 'stand',
     importance: orig?.importance ?? 'useful',
     videoUrl: orig?.videoUrl ?? '',
     mode: orig ? valo.modeOf(orig) : 'throw',
@@ -1488,6 +1489,9 @@ function buildEditor(body, groupId, orig, defaults) {
   const abilityGrid = h('div', { class: 'ability-grid' });
   const siteRow = h('div', { class: 'chip-row' });
   const modeRow = h('div', { class: 'chip-row' });
+  const throwRow = h('div', { class: 'chip-row' });
+  const moveRow = h('div', { class: 'chip-row' });
+  const throwMoveField = field('動き', moveRow);
   const titleInput = h('input', { class: 'text-input', maxlength: 80, placeholder: '例：B メインから B サイト奥のショック' });
   titleInput.value = f.title;
   titleInput.addEventListener('input', () => {
@@ -1527,10 +1531,8 @@ function buildEditor(body, groupId, orig, defaults) {
         field('種類', modeRow),
         field('サイト', siteRow),
         field('タイトル', titleInput),
-        field(
-          '投げ方',
-          selectEl(valo.THROW_TYPES, f.throwType, (v) => (f.throwType = v)),
-        ),
+        field('投げ方', throwRow),
+        throwMoveField,
         field(
           '重要度',
           selectEl(valo.IMPORTANCE, f.importance, (v) => (f.importance = v)),
@@ -1686,6 +1688,27 @@ function buildEditor(body, groupId, orig, defaults) {
     );
   }
 
+  // 投げ方：使い方はアビリティごと、動きは共通
+  function renderThrow() {
+    if (!f.agent || !f.ability) {
+      setChildren(throwRow, h('p', { class: 'field-note' }, '先にアビリティを選んでください'));
+      throwMoveField.hidden = true;
+      return;
+    }
+    const actions = valo.throwActions(f.agent, f.ability);
+    if (!actions.some((a) => a.id === f.throwType)) f.throwType = actions[0].id;
+    const chips = (row, list, value, onPick) =>
+      setChildren(
+        row,
+        list.map((x) =>
+          h('button', { type: 'button', class: `chip${value === x.id ? ' active' : ''}`, onClick: () => (onPick(x.id), renderThrow()) }, x.label),
+        ),
+      );
+    chips(throwRow, actions, f.throwType, (v) => (f.throwType = v));
+    throwMoveField.hidden = !valo.hasMove(f.throwType);
+    chips(moveRow, valo.MOVES, f.throwMove, (v) => (f.throwMove = v));
+  }
+
   function renderSites() {
     const map = valo.mapById(f.map);
     setChildren(
@@ -1807,6 +1830,7 @@ function buildEditor(body, groupId, orig, defaults) {
   function renderAll() {
     renderMapField();
     renderMode();
+    renderThrow();
     renderPlacing();
     renderAgents();
     renderAbilities();
@@ -1846,7 +1870,8 @@ function buildEditor(body, groupId, orig, defaults) {
         anyFrom: f.mode === 'placed',
         title,
         notes: f.notes.trim(),
-        throwType: f.throwType,
+        throwType: f.throwType ?? 'other',
+        throwMove: valo.hasMove(f.throwType) ? f.throwMove : 'stand',
         importance: f.importance,
         videoUrl: f.videoUrl,
         imageIds,

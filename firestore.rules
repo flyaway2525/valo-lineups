@@ -135,7 +135,7 @@ service cloud.firestore {
               'map', 'side', 'agent', 'ability', 'site', 'from', 'to',
               'title', 'notes', 'throwType', 'importance', 'videoUrl', 'imageIds',
               'createdBy', 'createdByName', 'createdAt', 'updatedBy', 'updatedByName', 'updatedAt',
-              'status', 'statusNote', 'statusBy', 'statusByName', 'statusAt', 'anyFrom', 'mode'])
+              'status', 'statusNote', 'statusBy', 'statusByName', 'statusAt', 'anyFrom', 'mode', 'throwMove'])
             && isValidStatus(d)
             && (!('anyFrom' in d) || d.anyFrom is bool)
             && (!('mode' in d) || d.mode in ['throw', 'placed', 'setup'])
@@ -148,6 +148,7 @@ service cloud.firestore {
             && isNonEmptyString(d.title, 80)
             && d.notes is string && d.notes.size() <= 2000
             && d.throwType is string && d.throwType.size() <= 20
+            && (!('throwMove' in d) || (d.throwMove is string && d.throwMove.size() <= 20))
             && d.importance in ['essential', 'useful', 'niche']
             && d.videoUrl is string && d.videoUrl.size() <= 300
             && (d.videoUrl == '' || d.videoUrl.matches('^https://.*'))
